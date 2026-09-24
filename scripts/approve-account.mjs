@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 
 if (fs.existsSync('.env.local')) process.loadEnvFile('.env.local');
-const email = process.argv[2]?.trim().toLowerCase();
+const email = process.argv.slice(2).filter(a => a !== '--')[0]?.trim().toLowerCase();
 if (!email || !process.env.MONGODB_URI) {
   throw new Error('Usage: npm run account:approve -- email@example.com (configure .env.local first)');
 }
