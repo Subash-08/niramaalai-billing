@@ -1,29 +1,55 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import Link from 'next/link';
 import {
-  IndianRupee,
-  Receipt,
-  FileText,
-  Users,
-  ArrowDownLeft,
-  ArrowUpRight,
-  Plus,
-  RefreshCw,
-  AlertCircle,
-  Printer,
-  ChevronRight,
-  TrendingUp,
+  AlertCircle, ArrowDownLeft, ArrowUpRight, ChevronRight, FileText,
+  IndianRupee, Plus, Printer, Receipt, RefreshCw, TrendingUp, Users,
 } from 'lucide-react';
-import { useStore } from './store';
-import { Card, PageHead, Btn, Badge } from './ui';
-import { money, TODAY, roundedTotal, balance } from '@/lib/domain';
+import {useStore} from './store';
+import {Badge, Btn, Card, PageHead} from './ui';
+import {balance, money, roundedTotal, TODAY, totals} from '@/lib/domain';
+
+type DashboardData = {
+  sales: {todayTotalPaise: number; todayCount: number; monthTotalPaise: number; monthGstPaise: number; monthCount: number};
+  dues: {totalCustomerOutstandingPaise: number};
+  payments: {moneyReceivedTodayPaise: number; receivedTodayCount: number; moneyPaidTodayPaise: number; paidTodayCount: number};
+  customerCount: number;
+  printJobsByStatus: Record<string, number>;
+  recentInvoices: any[];
+  outstandingInvoices: any[];
+  recentReceipts: any[];
+  recentVouchers: any[];
+};
+
+type MetricProps = {
+  label: string;
+  value: string;
+  hint: string;
+  icon: React.ReactNode;
+  tone: 'violet' | 'green' | 'amber' | 'red' | 'blue';
+};
+
+function MetricCard({label, value, hint, icon, tone}: MetricProps) {
+  return (
+    <article className="dashboard-metric">
+      <div className={`dashboard-metric-icon ${tone}`}>{icon}</div>
+      <div className="dashboard-metric-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{hint}</small>
+      </div>
+    </article>
+  );
+}
+
+function EmptyRows({columns, text}: {columns: number; text: string}) {
+  return <tr><td className="dashboard-empty-row" colSpan={columns}>{text}</td></tr>;
+}
 
 export default function Dashboard() {
-  const { state, isLive, notify } = useStore();
-
-  const [liveData, setLiveData] = useState<any>(null);
+  const {state, isLive} = useStore();
+  const [liveData, setLiveData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,617 +58,165 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/company/dashboard');
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to load live dashboard statistics.');
-      }
-      const json = await res.json();
-      setLiveData(json);
-    } catch (err: any) {
-      setError(err.message || 'Unable to connect to live billing data.');
+      const response = await fetch('/api/company/dashboard', {cache: 'no-store'});
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Failed to load live dashboard statistics.');
+      setLiveData(payload);
+    } catch (cause) {
       setLiveData(null);
+      setError(cause instanceof Error ? cause.message : 'Unable to connect to live billing data.');
     } finally {
       setLoading(false);
     }
   }, [isLive]);
 
   useEffect(() => {
-    if (isLive) {
-      fetchLiveDashboard();
+    if (isLive) void fetchLiveDashboard();
+    else {
+      setLiveData(null);
+      setError(null);
     }
   }, [isLive, fetchLiveDashboard]);
 
-  // Demo fallback only used when completely unauthenticated (not in Live mode)
-  const demoData = React.useMemo(() => {
+  const demoData = useMemo<DashboardData | null>(() => {
     if (isLive) return null;
-    const issuedBills = state.bills.filter(
-      (b: any) => b.kind !== 'Quotation' && b.status === 'Issued'
-    );
-    const todayBills = issuedBills.filter((b: any) => b.date === TODAY);
-    const monthBills = issuedBills.filter(
-      (b: any) => b.date.slice(0, 7) === TODAY.slice(0, 7)
-    );
-
-    const todayTotal = todayBills.reduce((acc, b) => acc + roundedTotal(b), 0);
-    const monthTotal = monthBills.reduce((acc, b) => acc + roundedTotal(b), 0);
-    const monthGst = monthBills.reduce(
-      (acc, b) =>
-        acc +
-        (b.lines || []).reduce(
-          (sum: number, l: any) => sum + (l.tax || 0),
-          0
-        ),
-      0
-    );
-    const totalDue = issuedBills.reduce((acc, b) => acc + balance(state, b), 0);
+    const invoices = state.bills.filter((bill: any) => bill.kind !== 'Quotation' && bill.status === 'Issued');
+    const todayInvoices = invoices.filter((bill: any) => bill.date === TODAY);
+    const monthInvoices = invoices.filter((bill: any) => bill.date?.slice(0, 7) === TODAY.slice(0, 7));
+    const receipts = state.payments.filter((payment: any) => payment.direction === 'In' && payment.date === TODAY);
+    const vouchers = state.payments.filter((payment: any) => payment.direction === 'Out' && payment.date === TODAY);
 
     return {
-      todayDate: TODAY,
       sales: {
-        todayTotalPaise: Math.round(todayTotal * 100),
-        todayCount: todayBills.length,
-        monthTotalPaise: Math.round(monthTotal * 100),
-        monthGstPaise: Math.round(monthGst * 100),
-        monthCount: monthBills.length,
+        todayTotalPaise: Math.round(todayInvoices.reduce((sum, bill) => sum + roundedTotal(bill), 0) * 100),
+        todayCount: todayInvoices.length,
+        monthTotalPaise: Math.round(monthInvoices.reduce((sum, bill) => sum + roundedTotal(bill), 0) * 100),
+        monthGstPaise: Math.round(monthInvoices.reduce((sum, bill) => sum + totals(bill).tax, 0) * 100),
+        monthCount: monthInvoices.length,
       },
-      dues: {
-        totalCustomerOutstandingPaise: Math.round(totalDue * 100),
-      },
+      dues: {totalCustomerOutstandingPaise: Math.round(invoices.reduce((sum, bill) => sum + balance(state, bill), 0) * 100)},
       payments: {
-        moneyReceivedTodayPaise: Math.round(todayTotal * 0.7 * 100),
-        receivedTodayCount: todayBills.length > 0 ? 1 : 0,
-        moneyPaidTodayPaise: 0,
-        paidTodayCount: 0,
+        moneyReceivedTodayPaise: Math.round(receipts.reduce((sum: number, payment: any) => sum + payment.amount, 0) * 100),
+        receivedTodayCount: receipts.length,
+        moneyPaidTodayPaise: Math.round(vouchers.reduce((sum: number, payment: any) => sum + payment.amount, 0) * 100),
+        paidTodayCount: vouchers.length,
       },
       customerCount: state.customers.length,
       printJobsByStatus: {
-        Queued: (state.jobs || []).filter((j: any) => j.status === 'Received').length,
-        Printing: (state.jobs || []).filter((j: any) => j.status === 'In Progress').length,
-        Completed: (state.jobs || []).filter((j: any) => j.status === 'Completed').length,
-        Delivered: (state.jobs || []).filter((j: any) => j.status === 'Delivered').length,
+        Queued: state.jobs.filter((job: any) => ['Received', 'Queued'].includes(job.status)).length,
+        Printing: state.jobs.filter((job: any) => ['In Progress', 'Printing'].includes(job.status)).length,
+        Completed: state.jobs.filter((job: any) => job.status === 'Completed').length,
+        Delivered: state.jobs.filter((job: any) => job.status === 'Delivered').length,
       },
-      recentInvoices: issuedBills.slice(0, 5).map((b: any) => ({
-        id: b.id,
-        invoiceNumber: b.id,
-        customerName:
-          state.customers.find((c: any) => c.id === b.customerId)?.name ||
-          'Customer',
-        date: b.date,
-        totalPaise: Math.round(roundedTotal(b) * 100),
-        duePaise: Math.round(balance(state, b) * 100),
-        paymentStatus: balance(state, b) === 0 ? 'Paid' : 'Unpaid',
+      recentInvoices: invoices.slice(0, 5).map((bill: any) => ({
+        id: bill.id,
+        invoiceNumber: bill.id,
+        customerName: state.customers.find((customer: any) => customer.id === bill.customerId)?.name || 'Customer',
+        date: bill.date,
+        dueDate: bill.due,
+        totalPaise: Math.round(roundedTotal(bill) * 100),
+        duePaise: Math.round(balance(state, bill) * 100),
       })),
-      outstandingInvoices: issuedBills
-        .filter((b: any) => balance(state, b) > 0)
-        .slice(0, 5)
-        .map((b: any) => ({
-          id: b.id,
-          invoiceNumber: b.id,
-          customerName:
-            state.customers.find((c: any) => c.id === b.customerId)?.name ||
-            'Customer',
-          date: b.date,
-          totalPaise: Math.round(roundedTotal(b) * 100),
-          duePaise: Math.round(balance(state, b) * 100),
-        })),
-      recentReceipts: [],
-      recentVouchers: [],
+      outstandingInvoices: invoices.filter((bill: any) => balance(state, bill) > 0).slice(0, 5).map((bill: any) => ({
+        id: bill.id,
+        invoiceNumber: bill.id,
+        customerName: state.customers.find((customer: any) => customer.id === bill.customerId)?.name || 'Customer',
+        dueDate: bill.due,
+        duePaise: Math.round(balance(state, bill) * 100),
+      })),
+      recentReceipts: state.payments.filter((payment: any) => payment.direction === 'In').slice(0, 5).map((payment: any) => ({
+        id: payment.id, receiptNumber: payment.id, customerName: state.customers.find((customer: any) => customer.id === payment.party)?.name || payment.party || 'Customer',
+        invoiceNumber: payment.reference || 'Invoice', amountPaise: Math.round(payment.amount * 100), method: payment.account, date: payment.date,
+      })),
+      recentVouchers: state.payments.filter((payment: any) => payment.direction === 'Out').slice(0, 5).map((payment: any) => ({
+        id: payment.id, voucherNumber: payment.id, payeeName: payment.party || 'Payee',
+        purpose: payment.purpose, amountPaise: Math.round(payment.amount * 100), method: payment.account, date: payment.date,
+      })),
     };
   }, [isLive, state]);
 
   const data = isLive ? liveData : demoData;
+  const activities = data ? [
+    ...data.recentReceipts.map(item => ({...item, kind: 'Receipt', label: item.receiptNumber, party: item.customerName, detail: `${item.invoiceNumber} · ${item.method}`, amountPaise: item.amountPaise, href: '/payments'})),
+    ...data.recentVouchers.map(item => ({...item, kind: 'Voucher', label: item.voucherNumber, party: item.payeeName, detail: `${item.purpose || 'Payment'} · ${item.method || item.account}`, amountPaise: item.amountPaise, href: '/payments'})),
+  ].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 6) : [];
 
-  return (
-    <>
-      <PageHead
-        title="Dashboard"
-        description="Live overview of sales, collections, disbursements, customer balances, and active print orders."
-        actions={
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <Link className="btn" href="/sales/new">
-              <Plus size={15} style={{ marginRight: '4px' }} /> New Invoice
-            </Link>
-            <Link className="btn secondary" href="/payments">
-              <ArrowDownLeft size={15} style={{ marginRight: '4px', color: 'var(--success, #16a34a)' }} /> Receive Money
-            </Link>
-            <Link className="btn secondary" href="/payments">
-              <ArrowUpRight size={15} style={{ marginRight: '4px', color: 'var(--danger, #ef4444)' }} /> Pay Money
-            </Link>
+  return <>
+    <PageHead
+      title="Dashboard"
+      description="Sales, GST, customer dues, receipts and payment vouchers from your billing records."
+      actions={<div className="dashboard-actions">
+        <Link className="btn" href="/sales/new"><Plus size={16}/>New invoice</Link>
+        <Link className="btn secondary" href="/payments"><ArrowDownLeft size={16}/>Receive money</Link>
+        <Link className="btn secondary" href="/payments"><ArrowUpRight size={16}/>Pay money</Link>
+      </div>}
+    />
+
+    {isLive && error && <div className="dashboard-error" role="alert">
+      <AlertCircle size={21}/>
+      <div><strong>Live dashboard unavailable</strong><span>{error}</span></div>
+      <Btn secondary onClick={fetchLiveDashboard} disabled={loading}><RefreshCw size={15}/>{loading ? 'Retrying…' : 'Retry'}</Btn>
+    </div>}
+
+    {isLive && loading && !data && <div className="dashboard-loading" role="status">
+      <RefreshCw className="spin" size={25}/><strong>Loading live billing data</strong><span>Your company records are being retrieved securely.</span>
+    </div>}
+
+    {data && <div className="dashboard-shell">
+      <section className="dashboard-primary-grid" aria-label="Billing summary">
+        <MetricCard label="Today’s sales" value={money(data.sales.todayTotalPaise / 100)} hint={`${data.sales.todayCount} invoice${data.sales.todayCount === 1 ? '' : 's'} issued`} icon={<IndianRupee size={21}/>} tone="violet"/>
+        <MetricCard label="This month’s sales" value={money(data.sales.monthTotalPaise / 100)} hint={`${data.sales.monthCount} invoice${data.sales.monthCount === 1 ? '' : 's'} this month`} icon={<TrendingUp size={21}/>} tone="green"/>
+        <MetricCard label="This month’s GST" value={money(data.sales.monthGstPaise / 100)} hint="CGST, SGST and IGST" icon={<FileText size={21}/>} tone="amber"/>
+        <MetricCard label="Customer outstanding" value={money(data.dues.totalCustomerOutstandingPaise / 100)} hint="Uncollected invoice balances" icon={<Users size={21}/>} tone="red"/>
+      </section>
+
+      <section className="dashboard-cash-grid" aria-label="Today’s payment activity">
+        <MetricCard label="Money received today" value={money(data.payments.moneyReceivedTodayPaise / 100)} hint={`${data.payments.receivedTodayCount} receipt${data.payments.receivedTodayCount === 1 ? '' : 's'} recorded`} icon={<ArrowDownLeft size={22}/>} tone="green"/>
+        <MetricCard label="Money paid today" value={money(data.payments.moneyPaidTodayPaise / 100)} hint={`${data.payments.paidTodayCount} payment voucher${data.payments.paidTodayCount === 1 ? '' : 's'}`} icon={<ArrowUpRight size={22}/>} tone="red"/>
+      </section>
+
+      <section className="dashboard-content-grid">
+        <Card title="Recent invoices" sub="Latest invoices issued to customers" actions={<Link className="text-link" href="/sales">View all <ChevronRight size={14}/></Link>}>
+          <div className="table-wrap"><table className="dashboard-table"><thead><tr><th>Invoice</th><th>Customer</th><th>Total</th><th>Due</th><th>Status</th></tr></thead><tbody>
+            {data.recentInvoices.map(invoice => <tr key={invoice.id}><td><Link className="record-link" href={`/sales/${invoice.id}`}>{invoice.invoiceNumber}</Link><small>{invoice.date}</small></td><td>{invoice.customerName}</td><td className="amount">{money(invoice.totalPaise / 100)}</td><td className={invoice.duePaise > 0 ? 'dashboard-due' : ''}>{money(invoice.duePaise / 100)}</td><td><Badge>{invoice.duePaise === 0 ? 'Paid' : 'Unpaid'}</Badge></td></tr>)}
+            {!data.recentInvoices.length && <EmptyRows columns={5} text="No invoices issued yet."/>}
+          </tbody></table></div>
+        </Card>
+
+        <Card title="Outstanding invoices" sub="Invoices that still need customer payment" actions={<Link className="text-link" href="/reports?report=Customer+outstanding">View report <ChevronRight size={14}/></Link>}>
+          <div className="table-wrap"><table className="dashboard-table"><thead><tr><th>Invoice</th><th>Customer</th><th>Due date</th><th>Pending</th><th/></tr></thead><tbody>
+            {data.outstandingInvoices.map(invoice => <tr key={invoice.id}><td><Link className="record-link" href={`/sales/${invoice.id}`}>{invoice.invoiceNumber}</Link></td><td>{invoice.customerName}</td><td>{invoice.dueDate || '—'}</td><td className="dashboard-due amount">{money(invoice.duePaise / 100)}</td><td><Link className="text-link" href="/payments">Receive</Link></td></tr>)}
+            {!data.outstandingInvoices.length && <EmptyRows columns={5} text="No outstanding invoices."/>}
+          </tbody></table></div>
+        </Card>
+      </section>
+
+      <section className="dashboard-lower-grid">
+        <Card title="Recent receipts and vouchers" sub="Latest money received and paid" actions={<Link className="text-link" href="/payments">Open ledger <ChevronRight size={14}/></Link>}>
+          <div className="dashboard-activity-list">
+            {activities.map(item => <Link href={item.href} key={`${item.kind}-${item.id}`} className="dashboard-activity">
+              <span className={`dashboard-activity-icon ${item.kind === 'Receipt' ? 'received' : 'paid'}`}>{item.kind === 'Receipt' ? <Receipt size={17}/> : <ArrowUpRight size={17}/>}</span>
+              <span><strong>{item.party}</strong><small>{item.label} · {item.detail} · {item.date}</small></span>
+              <b className={item.kind === 'Receipt' ? 'received' : 'paid'}>{item.kind === 'Receipt' ? '+' : '−'}{money(item.amountPaise / 100)}</b>
+            </Link>)}
+            {!activities.length && <div className="dashboard-empty-block">No receipts or payment vouchers recorded yet.</div>}
           </div>
-        }
-      />
+        </Card>
 
-      {/* Live mode retryable error banner */}
-      {isLive && error && (
-        <div
-          className="notice error"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '1rem',
-            marginBottom: '1.25rem',
-            borderRadius: '6px',
-            background: 'var(--danger-bg, #fef2f2)',
-            border: '1px solid var(--danger-border, #fecaca)',
-            color: 'var(--danger, #991b1b)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <AlertCircle size={20} />
-            <div>
-              <strong>Failed to load live dashboard statistics.</strong>
-              <div style={{ fontSize: '0.85rem' }}>{error}</div>
+        <div className="dashboard-side-stack">
+          <Card title="Print jobs" sub="Current production workload" actions={<Link className="text-link" href="/print-jobs">All jobs <ChevronRight size={14}/></Link>}>
+            <div className="dashboard-job-grid">{['Queued', 'Printing', 'Completed', 'Delivered'].map(status => <div key={status}><strong>{data.printJobsByStatus[status] || 0}</strong><span>{status}</span></div>)}</div>
+          </Card>
+          <Card title="Quick actions" sub="Common billing tasks">
+            <div className="dashboard-quick-grid">
+              <Link href="/customers"><Users size={17}/>Add customer</Link>
+              <Link href="/inventory"><Plus size={17}/>Add product</Link>
+              <Link href="/service-catalog"><Printer size={17}/>Add service</Link>
+              <Link href="/print-jobs"><FileText size={17}/>New print job</Link>
             </div>
-          </div>
-          <Btn onClick={fetchLiveDashboard} disabled={loading}>
-            <RefreshCw size={14} style={{ marginRight: '4px' }} className={loading ? 'spin' : ''} />
-            {loading ? 'Retrying…' : 'Retry'}
-          </Btn>
+          </Card>
         </div>
-      )}
-
-      {/* Loading state indicator */}
-      {isLive && loading && !liveData && (
-        <div
-          style={{
-            padding: '3rem',
-            textAlign: 'center',
-            color: 'var(--text-muted, #6b7280)',
-          }}
-        >
-          <RefreshCw size={24} className="spin" style={{ margin: '0 auto 0.75rem auto' }} />
-          <p>Loading real-time billing metrics…</p>
-        </div>
-      )}
-
-      {data && (
-        <>
-          {/* Row 1: Six Key Financial & Billing Summary Cards */}
-          <div
-            className="summary-dashboard"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: '1rem',
-              marginBottom: '1.5rem',
-            }}
-          >
-            {/* 1. Today's Sales */}
-            <Card>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600 }}>
-                    Today&apos;s Sales
-                  </p>
-                  <h2 style={{ margin: '0.35rem 0', fontSize: '1.45rem', fontWeight: 800 }}>
-                    {money((data.sales?.todayTotalPaise || 0) / 100)}
-                  </h2>
-                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
-                    {data.sales?.todayCount || 0} invoice{data.sales?.todayCount === 1 ? '' : 's'} issued today
-                  </small>
-                </div>
-                <div
-                  style={{
-                    padding: '8px',
-                    borderRadius: '8px',
-                    background: 'rgba(99, 102, 241, 0.1)',
-                    color: 'var(--primary, #6366f1)',
-                  }}
-                >
-                  <IndianRupee size={20} />
-                </div>
-              </div>
-            </Card>
-
-            {/* 2. Month's Sales */}
-            <Card>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600 }}>
-                    This Month&apos;s Sales
-                  </p>
-                  <h2 style={{ margin: '0.35rem 0', fontSize: '1.45rem', fontWeight: 800 }}>
-                    {money((data.sales?.monthTotalPaise || 0) / 100)}
-                  </h2>
-                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
-                    {data.sales?.monthCount || 0} invoice{data.sales?.monthCount === 1 ? '' : 's'} this calendar month
-                  </small>
-                </div>
-                <div
-                  style={{
-                    padding: '8px',
-                    borderRadius: '8px',
-                    background: 'rgba(16, 185, 129, 0.1)',
-                    color: 'var(--success, #10b981)',
-                  }}
-                >
-                  <TrendingUp size={20} />
-                </div>
-              </div>
-            </Card>
-
-            {/* 3. Month's GST */}
-            <Card>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600 }}>
-                    This Month&apos;s GST
-                  </p>
-                  <h2 style={{ margin: '0.35rem 0', fontSize: '1.45rem', fontWeight: 800 }}>
-                    {money((data.sales?.monthGstPaise || 0) / 100)}
-                  </h2>
-                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
-                    CGST, SGST &amp; IGST collected
-                  </small>
-                </div>
-                <div
-                  style={{
-                    padding: '8px',
-                    borderRadius: '8px',
-                    background: 'rgba(245, 158, 11, 0.1)',
-                    color: '#d97706',
-                  }}
-                >
-                  <FileText size={20} />
-                </div>
-              </div>
-            </Card>
-
-            {/* 4. Total Customer Outstanding */}
-            <Card>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600 }}>
-                    Customer Outstanding
-                  </p>
-                  <h2 style={{ margin: '0.35rem 0', fontSize: '1.45rem', fontWeight: 800, color: (data.dues?.totalCustomerOutstandingPaise || 0) > 0 ? 'var(--danger, #dc2626)' : 'inherit' }}>
-                    {money((data.dues?.totalCustomerOutstandingPaise || 0) / 100)}
-                  </h2>
-                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
-                    Total uncollected invoice balances
-                  </small>
-                </div>
-                <div
-                  style={{
-                    padding: '8px',
-                    borderRadius: '8px',
-                    background: 'rgba(239, 68, 68, 0.1)',
-                    color: 'var(--danger, #ef4444)',
-                  }}
-                >
-                  <Users size={20} />
-                </div>
-              </div>
-            </Card>
-
-            {/* 5. Money Received Today */}
-            <Card>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600 }}>
-                    Money Received Today
-                  </p>
-                  <h2 style={{ margin: '0.35rem 0', fontSize: '1.45rem', fontWeight: 800, color: 'var(--success, #16a34a)' }}>
-                    {money((data.payments?.moneyReceivedTodayPaise || 0) / 100)}
-                  </h2>
-                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
-                    {data.payments?.receivedTodayCount || 0} receipt{data.payments?.receivedTodayCount === 1 ? '' : 's'} recorded today
-                  </small>
-                </div>
-                <div
-                  style={{
-                    padding: '8px',
-                    borderRadius: '8px',
-                    background: 'rgba(22, 163, 74, 0.1)',
-                    color: 'var(--success, #16a34a)',
-                  }}
-                >
-                  <ArrowDownLeft size={20} />
-                </div>
-              </div>
-            </Card>
-
-            {/* 6. Money Paid Today */}
-            <Card>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600 }}>
-                    Money Paid Today
-                  </p>
-                  <h2 style={{ margin: '0.35rem 0', fontSize: '1.45rem', fontWeight: 800, color: 'var(--danger, #dc2626)' }}>
-                    {money((data.payments?.moneyPaidTodayPaise || 0) / 100)}
-                  </h2>
-                  <small style={{ color: 'var(--text-muted, #6b7280)' }}>
-                    {data.payments?.paidTodayCount || 0} payment voucher{data.payments?.paidTodayCount === 1 ? '' : 's'} today
-                  </small>
-                </div>
-                <div
-                  style={{
-                    padding: '8px',
-                    borderRadius: '8px',
-                    background: 'rgba(220, 38, 38, 0.1)',
-                    color: 'var(--danger, #dc2626)',
-                  }}
-                >
-                  <ArrowUpRight size={20} />
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Row 2: Tables & Detail Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
-            {/* Recent Invoices */}
-            <Card
-              title="Recent Invoices"
-              sub="Latest invoices issued to customers"
-              actions={
-                <Link className="text-link" href="/sales">
-                  View all <ChevronRight size={14} />
-                </Link>
-              }
-            >
-              <div className="table-wrap" style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border, #e5e7eb)', textAlign: 'left', color: 'var(--text-muted, #6b7280)' }}>
-                      <th style={{ padding: '0.5rem 0.65rem' }}>Invoice #</th>
-                      <th style={{ padding: '0.5rem 0.65rem' }}>Customer</th>
-                      <th style={{ padding: '0.5rem 0.65rem', textAlign: 'right' }}>Total</th>
-                      <th style={{ padding: '0.5rem 0.65rem', textAlign: 'right' }}>Due</th>
-                      <th style={{ padding: '0.5rem 0.65rem', textAlign: 'center' }}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.recentInvoices || []).map((inv: any) => (
-                      <tr key={inv.id} style={{ borderBottom: '1px solid var(--border-light, #f3f4f6)' }}>
-                        <td style={{ padding: '0.55rem 0.65rem', fontWeight: 600 }}>
-                          <Link href={`/sales/${inv.id}`} style={{ color: 'var(--primary, #6366f1)', textDecoration: 'none' }}>
-                            {inv.invoiceNumber || inv.id}
-                          </Link>
-                        </td>
-                        <td style={{ padding: '0.55rem 0.65rem' }}>{inv.customerName}</td>
-                        <td style={{ padding: '0.55rem 0.65rem', textAlign: 'right', fontWeight: 600 }}>
-                          {money((inv.totalPaise || 0) / 100)}
-                        </td>
-                        <td style={{ padding: '0.55rem 0.65rem', textAlign: 'right', color: inv.duePaise > 0 ? 'var(--danger, #dc2626)' : 'var(--text-muted, #6b7280)' }}>
-                          {money((inv.duePaise || 0) / 100)}
-                        </td>
-                        <td style={{ padding: '0.55rem 0.65rem', textAlign: 'center' }}>
-                          <Badge>
-                            {inv.duePaise === 0 ? 'Paid' : 'Unpaid'}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
-                    {(!data.recentInvoices || data.recentInvoices.length === 0) && (
-                      <tr>
-                        <td colSpan={5} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted, #6b7280)' }}>
-                          No invoices issued yet.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-
-            {/* Outstanding Invoices Requiring Attention */}
-            <Card
-              title="Outstanding Dues Requiring Attention"
-              sub="Uncollected invoices with pending balances"
-              actions={
-                <Link className="text-link" href="/reports?report=Customer+outstanding">
-                  All dues <ChevronRight size={14} />
-                </Link>
-              }
-            >
-              <div className="table-wrap" style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border, #e5e7eb)', textAlign: 'left', color: 'var(--text-muted, #6b7280)' }}>
-                      <th style={{ padding: '0.5rem 0.65rem' }}>Invoice #</th>
-                      <th style={{ padding: '0.5rem 0.65rem' }}>Customer</th>
-                      <th style={{ padding: '0.5rem 0.65rem' }}>Due Date</th>
-                      <th style={{ padding: '0.5rem 0.65rem', textAlign: 'right' }}>Pending Due</th>
-                      <th style={{ padding: '0.5rem 0.65rem', textAlign: 'center' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.outstandingInvoices || []).map((inv: any) => (
-                      <tr key={inv.id} style={{ borderBottom: '1px solid var(--border-light, #f3f4f6)' }}>
-                        <td style={{ padding: '0.55rem 0.65rem', fontWeight: 600 }}>
-                          <Link href={`/sales/${inv.id}`} style={{ color: 'var(--primary, #6366f1)', textDecoration: 'none' }}>
-                            {inv.invoiceNumber || inv.id}
-                          </Link>
-                        </td>
-                        <td style={{ padding: '0.55rem 0.65rem' }}>{inv.customerName}</td>
-                        <td style={{ padding: '0.55rem 0.65rem', color: 'var(--text-muted, #6b7280)', fontSize: '0.82rem' }}>
-                          {inv.dueDate || inv.date || '—'}
-                        </td>
-                        <td style={{ padding: '0.55rem 0.65rem', textAlign: 'right', fontWeight: 700, color: 'var(--danger, #dc2626)' }}>
-                          {money((inv.duePaise || 0) / 100)}
-                        </td>
-                        <td style={{ padding: '0.55rem 0.65rem', textAlign: 'center' }}>
-                          <Link
-                            href={`/payments`}
-                            className="btn secondary"
-                            style={{ padding: '3px 8px', fontSize: '0.75rem' }}
-                          >
-                            Receive
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                    {(!data.outstandingInvoices || data.outstandingInvoices.length === 0) && (
-                      <tr>
-                        <td colSpan={5} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--success, #16a34a)' }}>
-                          All customer invoices are settled! No overdue balances.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </div>
-
-          {/* Row 3: Recent Activity (Receipts & Vouchers) & Print Jobs */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
-            {/* Recent Payments (Receipts & Vouchers) */}
-            <Card
-              title="Recent Payments & Vouchers"
-              sub="Latest cash & bank transactions"
-              actions={
-                <Link className="text-link" href="/payments">
-                  Payments ledger <ChevronRight size={14} />
-                </Link>
-              }
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {(data.recentReceipts || []).slice(0, 3).map((r: any) => (
-                  <div
-                    key={r.id}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '0.65rem 0.75rem',
-                      background: 'rgba(22, 163, 74, 0.04)',
-                      border: '1px solid rgba(22, 163, 74, 0.15)',
-                      borderRadius: '6px',
-                      fontSize: '0.85rem',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, color: 'var(--success, #16a34a)' }}>
-                        <ArrowDownLeft size={13} style={{ display: 'inline', marginRight: '3px' }} />
-                        Receipt {r.receiptNumber} · {r.customerName}
-                      </div>
-                      <small style={{ color: 'var(--text-muted, #6b7280)' }}>
-                        Inv: {r.invoiceNumber} · Mode: {r.method} · {r.date}
-                      </small>
-                    </div>
-                    <div style={{ fontWeight: 700, color: 'var(--success, #16a34a)', fontSize: '0.95rem' }}>
-                      +{money((r.amountPaise || 0) / 100)}
-                    </div>
-                  </div>
-                ))}
-
-                {(data.recentVouchers || []).slice(0, 3).map((v: any) => (
-                  <div
-                    key={v.id}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '0.65rem 0.75rem',
-                      background: 'rgba(220, 38, 38, 0.04)',
-                      border: '1px solid rgba(220, 38, 38, 0.15)',
-                      borderRadius: '6px',
-                      fontSize: '0.85rem',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, color: 'var(--danger, #dc2626)' }}>
-                        <ArrowUpRight size={13} style={{ display: 'inline', marginRight: '3px' }} />
-                        Voucher {v.voucherNumber} · Paid to {v.payeeName}
-                      </div>
-                      <small style={{ color: 'var(--text-muted, #6b7280)' }}>
-                        Purpose: {v.purpose} · {v.account} ({v.method}) · {v.date}
-                      </small>
-                    </div>
-                    <div style={{ fontWeight: 700, color: 'var(--danger, #dc2626)', fontSize: '0.95rem' }}>
-                      -{money((v.amountPaise || 0) / 100)}
-                    </div>
-                  </div>
-                ))}
-
-                {(!data.recentReceipts?.length && !data.recentVouchers?.length) && (
-                  <p style={{ textAlign: 'center', color: 'var(--text-muted, #6b7280)', padding: '1rem' }}>
-                    No payment receipts or vouchers recorded yet.
-                  </p>
-                )}
-              </div>
-            </Card>
-
-            {/* Print Jobs Status & Quick Actions */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              {/* Print Jobs Overview */}
-              <Card
-                title="Print Jobs by Status"
-                sub="Production workflow in the press"
-                actions={
-                  <Link className="text-link" href="/print-jobs">
-                    All jobs <ChevronRight size={14} />
-                  </Link>
-                }
-              >
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.75rem', textAlign: 'center' }}>
-                  <div style={{ padding: '0.75rem 0.5rem', background: 'var(--surface-muted, #f9fafb)', borderRadius: '6px' }}>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{data.printJobsByStatus?.Queued || 0}</div>
-                    <small style={{ color: 'var(--text-muted, #6b7280)' }}>Queued</small>
-                  </div>
-                  <div style={{ padding: '0.75rem 0.5rem', background: 'rgba(99, 102, 241, 0.08)', borderRadius: '6px' }}>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--primary, #6366f1)' }}>
-                      {data.printJobsByStatus?.Printing || 0}
-                    </div>
-                    <small style={{ color: 'var(--primary, #6366f1)', fontWeight: 600 }}>Printing</small>
-                  </div>
-                  <div style={{ padding: '0.75rem 0.5rem', background: 'rgba(16, 185, 129, 0.08)', borderRadius: '6px' }}>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--success, #10b981)' }}>
-                      {data.printJobsByStatus?.Completed || 0}
-                    </div>
-                    <small style={{ color: 'var(--success, #10b981)', fontWeight: 600 }}>Completed</small>
-                  </div>
-                  <div style={{ padding: '0.75rem 0.5rem', background: 'var(--surface-muted, #f9fafb)', borderRadius: '6px' }}>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{data.printJobsByStatus?.Delivered || 0}</div>
-                    <small style={{ color: 'var(--text-muted, #6b7280)' }}>Delivered</small>
-                  </div>
-                </div>
-              </Card>
-
-              {/* Quick Actions */}
-              <Card title="Quick Actions" sub="Frequently used billing workflows">
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                    gap: '0.5rem',
-                  }}
-                >
-                  <Link className="btn secondary" href="/sales/new" style={{ fontSize: '0.8rem', padding: '0.45rem' }}>
-                    + New Invoice
-                  </Link>
-                  <Link className="btn secondary" href="/payments" style={{ fontSize: '0.8rem', padding: '0.45rem' }}>
-                    + Record Receipt
-                  </Link>
-                  <Link className="btn secondary" href="/payments" style={{ fontSize: '0.8rem', padding: '0.45rem' }}>
-                    + Payment Voucher
-                  </Link>
-                  <Link className="btn secondary" href="/customers" style={{ fontSize: '0.8rem', padding: '0.45rem' }}>
-                    + Add Customer
-                  </Link>
-                  <Link className="btn secondary" href="/inventory" style={{ fontSize: '0.8rem', padding: '0.45rem' }}>
-                    + Add Product
-                  </Link>
-                  <Link className="btn secondary" href="/service-catalog" style={{ fontSize: '0.8rem', padding: '0.45rem' }}>
-                    + Add Service
-                  </Link>
-                  <Link className="btn secondary" href="/print-jobs" style={{ fontSize: '0.8rem', padding: '0.45rem' }}>
-                    + New Print Job
-                  </Link>
-                  <Link className="btn secondary" href="/reports" style={{ fontSize: '0.8rem', padding: '0.45rem' }}>
-                    Open Reports
-                  </Link>
-                </div>
-              </Card>
-            </div>
-          </div>
-        </>
-      )}
-    </>
-  );
+      </section>
+    </div>}
+  </>;
 }

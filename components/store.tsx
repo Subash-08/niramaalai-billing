@@ -178,7 +178,6 @@ type Store = {
   fetchCustomerProfileApi: (customerId: string, query?: {page?: number; limit?: number}) => Promise<any>;
   createPaymentVoucherApi: (payload: any) => Promise<{success: boolean; voucher?: any; error?: string}>;
   fetchPaymentVouchersPage: (query?: any) => Promise<any>;
-  fetchAccountBalancesApi: () => Promise<{Cash: number; Bank: number}>;
 };
 
 function emptyLiveState(): State {
@@ -194,9 +193,14 @@ function emptyLiveState(): State {
 const Context = createContext<Store | null>(null);
 
 export function StoreProvider({children}: {children: ReactNode}) {
-  const [state, setState] = useState<State>(() => structuredClone(seed));
+  const demoModeEnabled = process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE === 'true';
+  const [state, setState] = useState<State>(() => demoModeEnabled ? structuredClone(seed) : emptyLiveState());
   const [clientReady, setClientReady] = useState(false);
   useEffect(() => {
+    if (!demoModeEnabled) {
+      setClientReady(true);
+      return;
+    }
     try {
       const saved = localStorage.getItem('print_billing_demo_state_v1');
       if (saved) {
@@ -205,7 +209,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
       }
     } catch {}
     setClientReady(true);
-  }, []);
+  }, [demoModeEnabled]);
   const [role, setRole] = useState('Staff');
   const [toast, setToast] = useState('');
   const [isLive, setIsLive] = useState(false);
@@ -221,7 +225,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
 
   function run(fn: (s: State) => State, message: string) {
     if (isLive) {
-      notify('This action is disabled in Live Mode until transaction modules are activated in Phases 3Ã¢â‚¬â€œ5.');
+      notify('This action is unavailable for the live company account.');
       return false;
     }
     try {
@@ -240,7 +244,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
       const meRes = await fetch('/api/auth/me', {cache: 'no-store'});
       if (!meRes.ok) {
         setIsLive(false);
-        setState(structuredClone(seed));
+        setState(demoModeEnabled ? structuredClone(seed) : emptyLiveState());
         setBusinessDataMode('demo-only');
         setCompanySession(null);
         setOpeningStatus(null);
@@ -253,9 +257,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
       setBusinessDataMode(meData.businessDataMode || 'live');
       setIsLive(true);
       setState(emptyLiveState());
-      if (!meData.profitUnlocked) {
-        setRole('Staff');
-      }
+      setRole('Staff');
 
       const bootRes = await fetch('/api/master/bootstrap');
       if (!bootRes.ok) {
@@ -337,19 +339,19 @@ export function StoreProvider({children}: {children: ReactNode}) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [demoModeEnabled]);
 
   useEffect(() => {
     refreshMasterData();
   }, [refreshMasterData]);
 
   useEffect(() => {
-    if (clientReady && !isLoading && !isLive && typeof window !== 'undefined') {
+    if (demoModeEnabled && clientReady && !isLoading && !isLive && typeof window !== 'undefined') {
       try {
         localStorage.setItem('print_billing_demo_state_v1', JSON.stringify(state));
       } catch {}
     }
-  }, [state, isLive, clientReady, isLoading]);
+  }, [state, isLive, clientReady, isLoading, demoModeEnabled]);
 
   function resetDemoData() {
     if (typeof window !== 'undefined') {
@@ -2212,16 +2214,6 @@ export function StoreProvider({children}: {children: ReactNode}) {
     return data;
   }
 
-  async function fetchAccountBalancesApi() {
-    if (!isLive) {
-      return {Cash: 5000000, Bank: 10000000};
-    }
-    try {
-      const res = await fetch('/api/payments/accounts');
-      if (res.ok) return await res.json();
-    } catch {}
-    return {Cash: 0, Bank: 0};
-  }
 
   async function fetchCustomerStatementApi(customerId: string, query: any = {}) {
     const p = new URLSearchParams();
@@ -2543,15 +2535,14 @@ export function StoreProvider({children}: {children: ReactNode}) {
         fetchCustomerProfileApi,
         createPaymentVoucherApi,
         fetchPaymentVouchersPage,
-        fetchAccountBalancesApi,
       }}
     >
-      {clientReady ? children : <div role="status" aria-live="polite" className="body-pad">Loading workspaceÃ¢â‚¬Â¦</div>}
+      {clientReady ? children : <div role="status" aria-live="polite" className="body-pad">Loading workspace…</div>}
       {toast && (
         <div className="toast" role="status">
           {toast}
           <button aria-label="Dismiss notification" onClick={() => setToast('')}>
-            Ãƒâ€”
+            ×
           </button>
         </div>
       )}

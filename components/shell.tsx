@@ -106,7 +106,7 @@ export default function Shell({children}: {children: ReactNode}) {
     };
   }, []);
 
-  const userName = isLive ? companySession?.user?.name || 'Company user' : 'Demo user';
+  const userName = isLive ? companySession?.user?.name || 'Company user' : 'Guest';
   const userEmail = isLive ? companySession?.user?.email || '' : '';
   const companyName = isLive ? companySession?.company?.name || state.settings.name || 'Company' : 'Billing Software';
   const initials = userName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'U';
@@ -122,7 +122,7 @@ export default function Shell({children}: {children: ReactNode}) {
       }
       setAccountOpen(false);
       await refreshMasterData();
-      notify('Signed out. Demo workspace is now active.');
+      notify('Signed out.');
       router.push('/account');
       router.refresh();
     } catch (error) {
@@ -283,7 +283,7 @@ export default function Shell({children}: {children: ReactNode}) {
               Live data · {companyName}
             </span>
           ) : (
-            <span className="demo-pill">Demo workspace</span>
+            <span className="demo-pill">Sign in required</span>
           )}
           <div className="notification-wrap">
             <button
@@ -321,7 +321,7 @@ export default function Shell({children}: {children: ReactNode}) {
               <div className="avatar">{initials}</div>
               <div>
                 <strong>{userName}</strong>
-                <span>{isLive ? companyName : 'Demo workspace'}</span>
+                <span>{isLive ? companyName : 'Company access'}</span>
               </div>
               <ChevronDown size={15} />
             </button>
@@ -331,14 +331,14 @@ export default function Shell({children}: {children: ReactNode}) {
                   <div className="avatar">{initials}</div>
                   <div>
                     <strong>{userName}</strong>
-                    <small>{userEmail || 'Sample data only'}</small>
+                    <small>{userEmail || 'Sign in to continue'}</small>
                   </div>
                 </div>
                 <div className={`account-data-status ${isLive ? 'live' : 'demo'}`}>
                   <span className="online-dot" />
                   <div>
-                    <strong>{isLive ? 'Live company data' : 'Demo workspace'}</strong>
-                    <small>{isLive ? companyName : 'Changes reset when the page reloads'}</small>
+                    <strong>{isLive ? 'Live company data' : 'Sign in required'}</strong>
+                    <small>{isLive ? companyName : 'No billing data is loaded'}</small>
                   </div>
                 </div>
                 <Link href="/account" role="menuitem" onClick={() => setAccountOpen(false)}>
@@ -364,10 +364,10 @@ export default function Shell({children}: {children: ReactNode}) {
         </header>
 
         <main className={pageMode === 'preview' ? 'preview-live-view' : pageMode === 'mixed' ? 'mixed-live-view' : ''}>
-          {!isLive && (
+          {!isLive && !isLoading && (
             <div className="module-migration-notice preview" role="status" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem'}}>
               <div>
-                <strong>Demo workspace:</strong> Changes are saved to local browser storage. Connect your live company account to persist directly in the multi-tenant database.
+                <strong>Company sign-in required:</strong> Sign in to access live tenant-isolated billing records.
               </div>
               <button
                 type="button"
@@ -401,7 +401,7 @@ export default function Shell({children}: {children: ReactNode}) {
 
         <footer className="app-footer">
           <span>{isLive ? companySession?.company?.name || state.settings.name || 'Billing Software' : 'Billing Software'}</span>
-          <span>{isLive ? `${pageMode === 'preview' ? 'Preview' : pageMode === 'mixed' ? 'Partly live' : 'Live'} module · Multi-tenant account` : 'Demo data · Changes reset on refresh'}</span>
+          <span>{isLive ? `${pageMode === 'preview' ? 'Preview' : pageMode === 'mixed' ? 'Partly live' : 'Live'} module · Multi-tenant account` : 'Secure company access'}</span>
         </footer>
       </div>
     </div>

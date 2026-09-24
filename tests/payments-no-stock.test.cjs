@@ -3,7 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 
 const dbModule = require('../.billing-test/server/db.js');
-const {createPaidVoucher, getPaidVoucher, listPaidVouchers, getTenantAccountBalances} = require('../.billing-test/server/payment-voucher-service.js');
+const {createPaidVoucher, getPaidVoucher, listPaidVouchers} = require('../.billing-test/server/payment-voucher-service.js');
 const {recordCustomerReceipt} = require('../.billing-test/server/customer-ledger.js');
 const {RecordCustomerReceiptSchema, IssueInvoiceSchema} = require('../.billing-test/server/sales-schema.js');
 const {issueInvoice} = require('../.billing-test/server/sales-service.js');
@@ -387,13 +387,10 @@ test('one receipt applies to one invoice and updates paymentStatus and duePaise 
   assert.equal(inv.duePaise, 0);
   assert.equal(inv.paymentStatus, 'Paid');
 
-  // Cash balance increased
+  // Receipt records the invoice payment without maintaining a cash ledger.
   const cash = store.tenantAccountBalances.find(b => b.tenantId === 'tenant-a' && b.account === 'Cash');
-  assert.equal(cash.balancePaise, 125000);
-
-  // Account movement created
-  assert.equal(store.accountMovements.length, 1);
-  assert.equal(store.accountMovements[0].qty, 25000);
+  assert.equal(cash.balancePaise, 100000);
+  assert.equal(store.accountMovements.length, 0);
 });
 
 test('partial payment reduces invoice due and marks invoice PartlyPaid', async () => {
@@ -570,20 +567,18 @@ test('duplicate receipt idempotency retry returns cached response without double
   assert.equal(first._id, second._id);
   assert.equal(first.receiptNumber, second.receiptNumber);
 
-  // Cash balance incremented only once
+  // Retry creates one receipt and never maintains a cash ledger.
   const cash = store.tenantAccountBalances.find(b => b.tenantId === 'tenant-a' && b.account === 'Cash');
-  assert.equal(cash.balancePaise, 25000);
-
-  // Only one receipt and one movement in store
+  assert.equal(cash.balancePaise, 20000);
   assert.equal(store.customerReceipts.length, 1);
-  assert.equal(store.accountMovements.length, 1);
+  assert.equal(store.accountMovements.length, 0);
 });
 
 // ==========================================
 // 3. Payment Voucher Tests
 // ==========================================
 
-test('createPaidVoucher generates PV numbering, writes account movement and audit', async () => {
+test('createPaidVoucher generates PV numbering and audit without maintaining account balances', async () => {
   const {db, store} = createFixture({
     tenantAccountBalances: [
       {tenantId: 'tenant-a', account: 'Cash', balancePaise: 500000, version: 1},
@@ -605,7 +600,8 @@ test('createPaidVoucher generates PV numbering, writes account movement and audi
 
   assert.equal(voucher1.voucherNumber.startsWith('PV-'), true);
   assert.equal(voucher1.amountPaise, 120000);
-  assert.equal(voucher1.account, 'Bank');
+  assert.equal(voucher1.method, 'BankTransfer');
+  assert.equal(voucher1.account, undefined);
 
   // Verify second voucher sequence
   const voucher2 = await createPaidVoucher(db, tenantA, {
@@ -622,78 +618,54 @@ test('createPaidVoucher generates PV numbering, writes account movement and audi
 
   assert.notEqual(voucher1.voucherNumber, voucher2.voucherNumber);
 
-  // Verify account balance debit
+  // Voucher register does not debit an internal cash or bank balance.
   const bank = store.tenantAccountBalances.find(b => b.tenantId === 'tenant-a' && b.account === 'Bank');
-  assert.equal(bank.balancePaise, 500000 - 120000 - 50000); // 330000
-
-  // Verify account movements
-  assert.equal(store.accountMovements.length, 2);
-  assert.equal(store.accountMovements[0].direction, 'Out');
-  assert.equal(store.accountMovements[0].qty, -120000);
+  assert.equal(bank.balancePaise, 500000);
+  assert.equal(store.accountMovements.length, 0);
 
   // Verify audit history
   assert.equal(store.auditHistory.length, 2);
   assert.equal(store.auditHistory[0].entityType, 'paymentVoucher');
 });
 
-test('insufficient account balance rolls back payment voucher transaction atomically', async () => {
+test('payment voucher does not require a maintained cash or bank balance', async () => {
   const {db, store} = createFixture({
     tenantAccountBalances: [
-      {tenantId: 'tenant-a', account: 'Cash', balancePaise: 10000, version: 1},
-      {tenantId: 'tenant-a', account: 'Bank', balancePaise: 10000, version: 1},
+      {tenantId: 'tenant-a', account: 'Cash', balancePaise: 0, version: 1},
+      {tenantId: 'tenant-a', account: 'Bank', balancePaise: 0, version: 1},
     ],
   });
 
-  await assert.rejects(
-    createPaidVoucher(db, tenantA, {
-      date: '2026-09-24',
-      payeeName: 'Delivery Agent',
-      amountPaise: 25000, // ₹250 exceeds ₹100
-      account: 'Cash',
-      method: 'Cash',
-      purpose: 'Courier charges',
-      idempotencyKey: 'pv-overdraft',
-    }),
-    /Insufficient cash balance/
-  );
+  const voucher = await createPaidVoucher(db, tenantA, {
+    date: '2026-09-24',
+    payeeName: 'Delivery Agent',
+    amountPaise: 25000,
+    method: 'Cash',
+    purpose: 'Courier charges',
+    idempotencyKey: 'pv-no-balance-required',
+  });
 
-  // Balance remains untouched
-  const cash = store.tenantAccountBalances.find(b => b.tenantId === 'tenant-a' && b.account === 'Cash');
-  assert.equal(cash.balancePaise, 10000);
-
-  // No voucher or movement created
-  assert.equal(store.paymentVouchers.length, 0);
+  assert.equal(voucher.amountPaise, 25000);
+  assert.equal(voucher.method, 'Cash');
+  assert.equal(store.paymentVouchers.length, 1);
   assert.equal(store.accountMovements.length, 0);
+  assert.equal(store.tenantAccountBalances[0].balancePaise, 0);
 });
 
-test('incompatible payment method is rejected by PaidVoucherSchema', async () => {
-  // Cash account with UPI method
-  await assert.rejects(
-    createPaidVoucher({}, tenantA, {
-      date: '2026-09-24',
-      payeeName: 'Vendor',
-      amountPaise: 1000,
-      account: 'Cash',
-      method: 'UPI',
-      purpose: 'Test',
-      idempotencyKey: 'pv-bad-method-1',
-    }),
-    /Cash account requires Cash; other methods require Bank/
-  );
-
-  // Bank account with Cash method
-  await assert.rejects(
-    createPaidVoucher({}, tenantA, {
-      date: '2026-09-24',
-      payeeName: 'Vendor',
-      amountPaise: 1000,
-      account: 'Bank',
-      method: 'Cash',
-      purpose: 'Test',
-      idempotencyKey: 'pv-bad-method-2',
-    }),
-    /Cash account requires Cash; other methods require Bank/
-  );
+test('payment method is recorded without requiring an account selection', async () => {
+  const {db} = createFixture({});
+  const upi = await createPaidVoucher(db, tenantA, {
+    date: '2026-09-24', payeeName: 'Vendor', amountPaise: 1000,
+    method: 'UPI', purpose: 'Test payment', idempotencyKey: 'pv-method-upi',
+  });
+  const cash = await createPaidVoucher(db, tenantA, {
+    date: '2026-09-24', payeeName: 'Technician', amountPaise: 2000,
+    method: 'Cash', purpose: 'Service charge', idempotencyKey: 'pv-method-cash',
+  });
+  assert.equal(upi.method, 'UPI');
+  assert.equal(cash.method, 'Cash');
+  assert.equal(upi.account, undefined);
+  assert.equal(cash.account, undefined);
 });
 
 test('cross-tenant payment voucher GET and listing isolation', async () => {
@@ -970,7 +942,7 @@ test('voucher numbering generates sequential tenant-scoped PV numbers', async ()
   assert.equal(v2.voucherNumber, 'PV-2026-0002');
 });
 
-test('voucher idempotency returns existing voucher without duplicate account movement', async () => {
+test('voucher idempotency returns one voucher without account movements', async () => {
   const {db, store} = createFixture({});
 
   const initialMovements = store.accountMovements.length;
@@ -985,7 +957,7 @@ test('voucher idempotency returns existing voucher without duplicate account mov
     idempotencyKey: 'pv-idem-unique',
   });
 
-  assert.equal(store.accountMovements.length, initialMovements + 1);
+  assert.equal(store.accountMovements.length, initialMovements);
 
   // Retry with same idempotency key
   const v2 = await createPaidVoucher(db, tenantA, {
@@ -1001,7 +973,7 @@ test('voucher idempotency returns existing voucher without duplicate account mov
   assert.equal(v2._id, v1._id);
   assert.equal(v2.voucherNumber, v1.voucherNumber);
   // No additional account movement created
-  assert.equal(store.accountMovements.length, initialMovements + 1);
+  assert.equal(store.accountMovements.length, initialMovements);
 });
 
 test('two concurrent receipts cannot overpay the invoice', async () => {

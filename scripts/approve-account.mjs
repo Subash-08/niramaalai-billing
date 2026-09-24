@@ -10,7 +10,7 @@ if (!email || !process.env.MONGODB_URI) {
 
 const client = await new MongoClient(process.env.MONGODB_URI).connect();
 try {
-  const db = client.db(process.env.MONGODB_DB || 'itech_dev');
+  const db = client.db(process.env.MONGODB_DB || 'niramaalai');
   const user = await db.collection('authUsers').findOne({email});
   if (!user) throw new Error('Account not found.');
   const session = client.startSession();

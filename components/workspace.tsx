@@ -22,6 +22,7 @@ export default function Workspace(){
   const query=useSearchParams();
   const routeKey=path+query.toString();
   const router=useRouter();
+  const {isLive,isLoading}=useStore();
 
   useEffect(()=>{
     const ctx=(document as Document&{modelContext?:{registerTool:(t:unknown,o:unknown)=>unknown}}).modelContext;
@@ -30,7 +31,7 @@ export default function Workspace(){
     try{
       Promise.resolve(ctx.registerTool({
         name:'start_new_invoice',
-        description:'Navigate to the new invoice form. Does not issue an invoice or move stock.',
+        description:'Navigate to the new invoice form. Does not issue an invoice or alter balances.',
         inputSchema:{type:'object',properties:{},additionalProperties:false},
         execute:(input:unknown)=>{
           if(!input||typeof input!=='object'||Object.keys(input).length)throw new Error('Expected an empty object.');
@@ -43,6 +44,8 @@ export default function Workspace(){
   },[router]);
 
   const [section,id]=path.split('/').filter(Boolean);
+  if(isLoading)return <div className="empty">Loading your company account…</div>;
+  if(!isLive&&section!=='account')return <AccountAccess/>;
   if(!section)return <Dashboard/>;
   switch(section){
     case 'account':return <AccountAccess/>;

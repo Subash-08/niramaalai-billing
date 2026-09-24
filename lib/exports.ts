@@ -285,7 +285,7 @@ export async function paymentVoucherPdfBytes(settings: any, voucher: any) {
   const metaInfo = [
     'Voucher No: ' + voucherNo,
     'Date: ' + voucherDate,
-    'Debit Account: ' + (voucher.account || 'Bank'),
+    'Payment Method: ' + (voucher.method || 'Cash'),
     'Payment Method: ' + (voucher.method || 'BankTransfer'),
     'Reference / UTR: ' + (voucher.reference || 'N/A'),
   ].join('\n');
@@ -303,7 +303,7 @@ export async function paymentVoucherPdfBytes(settings: any, voucher: any) {
     [[
       '1',
       voucher.purpose || 'Payment',
-      voucher.account || 'Bank',
+      voucher.method || 'Cash',
       voucher.method || 'BankTransfer',
       cash(amount),
     ]],

@@ -188,42 +188,6 @@ export async function recordCustomerReceipt(
       const receiptId = uid('RCP');
       const receiptNumber = await nextTenantSequence(db, tenantId, 'Receipt', year, 'RCP', session);
 
-      // Update cash / bank account balances & write movements
-      for (const component of input.components) {
-        const accResult = await col(db, 'tenantAccountBalances').updateOne(
-          {
-            tenantId,
-            account: component.account,
-            balancePaise: {$gte: 0, $lte: Number.MAX_SAFE_INTEGER - component.amountPaise},
-          },
-          {
-            $inc: {balancePaise: component.amountPaise, version: 1},
-            $set: {updatedAt: now},
-          },
-          {session}
-        );
-        if (accResult.matchedCount !== 1) {
-          throw new AppError(409, `${component.account} balance missing or outside supported range.`);
-        }
-
-        await col(db, 'accountMovements').insertOne(
-          {
-            _id: uid('ACM'),
-            tenantId,
-            account: component.account,
-            date: input.date,
-            qty: component.amountPaise,
-            reason: 'Customer receipt',
-            reference: receiptNumber,
-            sourceType: 'CustomerReceipt',
-            sourceId: receiptId,
-            createdAt: now,
-            createdBy: identity.userId,
-          },
-          {session}
-        );
-      }
-
       let advanceId: string | undefined;
       if (excessPaise > 0) {
         advanceId = uid('ADV');
@@ -839,42 +803,6 @@ export async function reverseCustomerReceipt(
         },
         {session}
       );
-
-      // Reversal of funds from Cash/Bank (with overdraft check)
-      for (const comp of receipt.components || []) {
-        const accResult = await col(db, 'tenantAccountBalances').updateOne(
-          {
-            tenantId,
-            account: comp.account,
-            balancePaise: {$gte: comp.amountPaise},
-          },
-          {
-            $inc: {balancePaise: -comp.amountPaise, version: 1},
-            $set: {updatedAt: now},
-          },
-          {session}
-        );
-        if (accResult.matchedCount !== 1) {
-          throw new AppError(409, `Insufficient balance in ${comp.account} to reverse receipt.`);
-        }
-
-        await col(db, 'accountMovements').insertOne(
-          {
-            _id: uid('ACM'),
-            tenantId,
-            account: comp.account,
-            date: reversalDate,
-            qty: -comp.amountPaise,
-            reason: 'Customer receipt reversal',
-            reference: receipt.receiptNumber,
-            sourceType: 'CustomerReceiptReversal',
-            sourceId: receipt._id,
-            createdAt: now,
-            createdBy: identity.userId,
-          },
-          {session}
-        );
-      }
 
       await col(db, 'customerReceipts').updateOne(
         {_id: receipt._id, tenantId},

@@ -21,11 +21,11 @@ The application operates in **D:\AI\niramaalia** independently. The reference di
   - Multi-invoice allocations, oldest-first auto-split, and receipt-generated customer advances are eliminated.
 - **Outgoing Payment Vouchers**:
   - Tenant-scoped transactional outgoing payment vouchers (`PV-...`).
-  - Strict account/method compatibility: `Cash` account requires `Cash` method; non-cash methods (`UPI`, `BankTransfer`, `Card`, `Cheque`) require `Bank` account.
-  - Prevents overdrafts with balance projections, posts account movements and audit history in an atomic transaction.
+  - Records payee, date, amount, purpose, payment method, reference, notes, and an immutable company snapshot.
+  - Does not maintain cash-in-hand, bank balances, account movements, or overdraft rules.
 - **Payments UI (`/payments`)**:
   - Prominent sidebar item `Payments & receipts`.
-  - Financial summary cards: Total Received, Total Paid, Cash in Hand, Bank Balance.
+  - Summary cards show document totals for money received and money paid; they are not cash-flow account balances.
   - Two tabs: `Money received` (customer receipts) and `Money paid` (payment vouchers) with search, date filters, modals, and detail preview.
 - **Professional Vector Printable Documents**:
   - High-quality vector/text PDFs generated via jsPDF for **Receipts**, **Payment Vouchers**, and **Delivery Challans**.
@@ -56,9 +56,9 @@ cp .env.example .env.local
 
 Configure your environment variables in `.env.local`:
 ```env
-# MongoDB Atlas Connection URI (Must be a fresh, disposable Atlas database)
-MONGODB_URI="mongodb+srv://<username>:<password>@<cluster>.mongodb.net/billing_dev?retryWrites=true&w=majority"
-MONGODB_DB="billing_dev"
+# MongoDB Atlas connection URI and database name
+MONGODB_URI="mongodb+srv://<username>:<password>@<cluster>.mongodb.net/niramaalai?retryWrites=true&w=majority"
+MONGODB_DB="niramaalai"
 
 # Better Auth Secret (Random string, 32+ characters)
 BETTER_AUTH_SECRET="your-32-character-random-secret-key-here"
@@ -67,8 +67,14 @@ BETTER_AUTH_SECRET="your-32-character-random-secret-key-here"
 APP_ORIGIN="http://localhost:3000"
 BETTER_AUTH_URL="http://localhost:3000"
 
-# Private Storage Root (Writable directory on the local machine for logos and files)
+# Local-development storage fallback
 PRIVATE_STORAGE_ROOT="D:\\AI\\niramaalia_storage"
+
+# Production file storage
+CLOUDINARY_CLOUD_NAME="..."
+CLOUDINARY_API_KEY="..."
+CLOUDINARY_API_SECRET="..."
+STORAGE_CREDENTIALS_KEY_V1="..."
 ```
 *Note: Never reuse old or shared credentials from D:\AI\itech.*
 
@@ -87,10 +93,10 @@ All verification commands have been executed and pass cleanly:
 
 | Check | Command | Result | Details |
 |---|---|---|---|
-| **TypeScript Typecheck** | `npm run typecheck` | **PASS** | 0 errors across the entire codebase |
-| **Domain Arithmetic Tests** | `npm test` | **PASS** | 26/26 tests passed |
-| **Core & Payments Tests** | `npm run test:core` | **PASS** | 22/22 tests passed (includes `tests/billing-core.test.cjs` & `tests/payments-no-stock.test.cjs`) |
-| **Production Build** | `npm run build` | **PASS** | All 34 Next.js routes compiled and generated successfully |
+| **TypeScript Typecheck** | `npm run typecheck` | **PASS** | 0 errors across the entire codebase (`tsc --noEmit`) |
+| **Domain & Route Integrity Tests** | `npm test` | **PASS** | 12/12 tests passed (`tests/domain.test.mjs`) |
+| **Core & Payments Tests** | `npm run test:core` | **PASS** | 28/28 tests passed (`tests/billing-core.test.cjs` & `tests/payments-no-stock.test.cjs`) |
+| **Production Build** | `npm run build` | **PASS** | All 32 Next.js routes compiled and generated successfully with webpack |
 
 ### Tests Covered in `tests/payments-no-stock.test.cjs`:
 1. `RecordCustomerReceiptSchema allows exactly one invoice allocation`
@@ -102,22 +108,31 @@ All verification commands have been executed and pass cleanly:
 7. `receipt amount and allocation mismatch is rejected`
 8. `cross-tenant customer receipt is rejected (tenant isolation)`
 9. `duplicate receipt idempotency retry returns cached response without double-crediting`
-10. `createPaidVoucher generates PV numbering, writes account movement and audit`
-11. `insufficient account balance rolls back payment voucher transaction atomically`
-12. `incompatible payment method is rejected by PaidVoucherSchema`
+10. `createPaidVoucher generates PV numbering and audit without maintaining account balances`
+11. `payment voucher does not require a maintained cash or bank balance`
+12. `payment method is recorded without requiring an account selection`
 13. `cross-tenant payment voucher GET and listing isolation`
 14. `product invoice issues without stock records and never modifies stock collections`
+15. `wrong-customer invoice allocation is rejected`
+16. `RecordCustomerReceiptSchema rejects zero or negative amounts`
+17. `receipt snapshot contains correct before/after balances`
+18. `voucher numbering generates sequential tenant-scoped PV numbers`
+19. `voucher idempotency returns one voucher without account movements`
+20. `two concurrent receipts cannot overpay the invoice`
 
 ---
 
-## Current Status & Next Steps
+## Current Status & Acceptance Notice
 
 - **Completed**:
-  - Full removal of stock tracking, movements, reservations, lots, and serials from products and invoice issuance.
-  - Single-invoice customer receipt enforcement with real-time post-payment balance calculation.
-  - Outgoing payment voucher APIs (`/api/payments/vouchers`), accounts balance endpoint (`/api/payments/accounts`), and UI (`/payments`).
-  - Accessible `SearchSelect` combobox across invoice, receipt, print jobs, and customer selectors.
+  - Full removal of stock tracking, movements, reservations, lots, and serials from products, reports, dashboard, and invoice issuance.
+  - Deletion of `/api/inventory` routes and `/api/master/products/[id]/adjust`.
+  - Single-invoice customer receipt enforcement with real-time post-payment balance calculation and snapshot preservation.
+  - Server-side payment summary totals and independent pagination (25, 50, 100) on Payments page.
+  - Outgoing payment voucher APIs (`/api/payments/vouchers`), document summary endpoint (`/api/payments/summary`), and UI (`/payments`). The cash/bank account-balance API has been removed.
+  - Accessible `SearchSelect` combobox with live asynchronous search across customers, products, services, and invoice selectors.
   - Delivery Challan preview, browser print, and vector jsPDF generation for invoices and print jobs.
   - Customer payment reminder with editable template, Copy action, and user-initiated WhatsApp link.
-  - Full automated test suite and clean Next.js production build.
-- **Atlas Acceptance Notice**: Live multi-tenant database acceptance is pending user provisioning of a new, disposable MongoDB Atlas URI in `.env.local`. Credentials from `D:\AI\itech` are strictly forbidden.
+  - Focused billing dashboard with sales summary cards, recent invoices, dues requiring attention, recent receipts/vouchers, print jobs by status, and quick billing actions.
+  - Full automated test suite (40 total tests across unit and core suites) and clean Next.js production build.
+- **Production verification**: Run `npm run verify:atlas`, deploy, then run `npm run verify:production`. The production verifier checks database health, authentication enforcement, removed account-ledger behavior, security headers, and framework-header suppression against `APP_ORIGIN`.

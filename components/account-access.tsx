@@ -25,7 +25,7 @@ export default function AccountAccess() {
     <>
       <PageHead
         title="Company account"
-        description="Backend foundation: each company has its own approved account, private files, and isolated database records."
+        description="Sign in to your approved company account to access its private billing records."
       />
       <div className="notice">
         {isLive ? (
@@ -34,7 +34,7 @@ export default function AccountAccess() {
           </span>
         ) : (
           <span>
-            Operating in demonstration mode. Sign in to an approved company account to load and persist live master data.
+            Sign in to load and update your company’s live billing data.
           </span>
         )}
       </div>
@@ -159,9 +159,7 @@ export default function AccountAccess() {
                 </Btn>
               </>
             )}
-            <Link className="btn secondary" href="/">
-              Return to demo
-            </Link>
+            {loggedIn && <Link className="btn secondary" href="/">Open dashboard</Link>}
           </div>
         </form>
       </Card>

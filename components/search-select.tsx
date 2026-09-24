@@ -73,14 +73,11 @@ export default function SearchSelect({
       )
     : options;
 
-  // Debounced async search with cancellation
+  // Debounced async search. Stale requests are ignored instead of aborted so
+  // React Strict Mode cleanup does not surface AbortError in the console.
   useEffect(() => {
     if (!onSearch) return;
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
+    let cancelled = false;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -88,24 +85,21 @@ export default function SearchSelect({
       setLoading(true);
       try {
         const results = await onSearch(query, controller.signal);
-        if (!controller.signal.aborted) {
+        if (!cancelled) {
           setAsyncResults(results);
           setActiveIndex(-1);
         }
       } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          console.error('Search error:', err);
-        }
+        if (!cancelled && err?.name !== 'AbortError') console.error('Search error:', err);
       } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     }, 280);
 
     return () => {
+      cancelled = true;
       clearTimeout(timer);
-      controller.abort();
+      if (abortControllerRef.current === controller) abortControllerRef.current = null;
     };
   }, [query, onSearch]);
 

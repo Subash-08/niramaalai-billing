@@ -7,8 +7,6 @@ import {
   Plus,
   Printer,
   Download,
-  Building,
-  Banknote,
   Eye,
 } from 'lucide-react';
 import { useStore } from './store';
@@ -35,13 +33,10 @@ export default function Payments({ id }: { id?: string }) {
     notify,
     fetchCustomerReceiptsPage,
     fetchPaymentVouchersPage,
-    fetchAccountBalancesApi,
   } = useStore();
 
   const [activeTab, setActiveTab] = useState<'received' | 'paid'>('received');
 
-  // Balances
-  const [balances, setBalances] = useState<{ Cash: number; Bank: number }>({ Cash: 0, Bank: 0 });
 
   // Server summary totals (never bound to single page)
   const [summaryTotals, setSummaryTotals] = useState<{
@@ -49,15 +44,11 @@ export default function Payments({ id }: { id?: string }) {
     totalPaidPaise: number;
     receiptCount: number;
     voucherCount: number;
-    cashBalancePaise: number;
-    bankBalancePaise: number;
   }>({
     totalReceivedPaise: 0,
     totalPaidPaise: 0,
     receiptCount: 0,
     voucherCount: 0,
-    cashBalancePaise: 0,
-    bankBalancePaise: 0,
   });
 
   // Receipt list & pagination state
@@ -96,22 +87,10 @@ export default function Payments({ id }: { id?: string }) {
       if (res.ok) {
         const json = await res.json();
         setSummaryTotals(json);
-        if (json.cashBalancePaise !== undefined) {
-          setBalances({ Cash: json.cashBalancePaise, Bank: json.bankBalancePaise });
-        }
       }
     } catch {}
   }, []);
 
-  // Load balances
-  const refreshBalances = useCallback(async () => {
-    try {
-      const b = await fetchAccountBalancesApi();
-      if (b && typeof b.Cash === 'number') {
-        setBalances(b);
-      }
-    } catch {}
-  }, [fetchAccountBalancesApi]);
 
   // Load Receipts with real pagination
   const loadReceipts = useCallback(async () => {
@@ -149,9 +128,6 @@ export default function Payments({ id }: { id?: string }) {
       setVouchers(res.items || []);
       setVouchersTotal(res.total || 0);
       setVoucherTotalPages(res.totalPages || 1);
-      if (res.balances) {
-        setBalances(res.balances);
-      }
     } catch (e: any) {
       if (isLive) notify(e.message || 'Failed to load payment vouchers.');
     } finally {
@@ -160,9 +136,8 @@ export default function Payments({ id }: { id?: string }) {
   }, [fetchPaymentVouchersPage, voucherPage, voucherLimit, voucherSearch, voucherDateFrom, voucherDateTo, isLive, notify]);
 
   useEffect(() => {
-    refreshBalances();
     refreshSummary();
-  }, [refreshBalances, refreshSummary]);
+  }, [refreshSummary]);
 
   useEffect(() => {
     if (activeTab === 'received') {
@@ -225,121 +200,6 @@ export default function Payments({ id }: { id?: string }) {
           marginBottom: '1.5rem',
         }}
       >
-        <Card className="summary-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600, textTransform: 'uppercase' }}>
-                Money Received
-              </span>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--success, #16a34a)', marginTop: '4px' }}>
-                {money(summaryTotals.totalReceivedPaise / 100)}
-              </div>
-              <small style={{ color: 'var(--text-muted, #9ca3af)', fontSize: '0.75rem' }}>
-                {summaryTotals.receiptCount} total customer {summaryTotals.receiptCount === 1 ? 'receipt' : 'receipts'}
-              </small>
-            </div>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: '8px',
-                background: 'rgba(22, 163, 74, 0.1)',
-                color: '#16a34a',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <ArrowDownLeft size={20} />
-            </div>
-          </div>
-        </Card>
-
-        <Card className="summary-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600, textTransform: 'uppercase' }}>
-                Money Paid
-              </span>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--danger, #dc2626)', marginTop: '4px' }}>
-                {money(summaryTotals.totalPaidPaise / 100)}
-              </div>
-              <small style={{ color: 'var(--text-muted, #9ca3af)', fontSize: '0.75rem' }}>
-                {summaryTotals.voucherCount} total payment {summaryTotals.voucherCount === 1 ? 'voucher' : 'vouchers'}
-              </small>
-            </div>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: '8px',
-                background: 'rgba(220, 38, 38, 0.1)',
-                color: '#dc2626',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <ArrowUpRight size={20} />
-            </div>
-          </div>
-        </Card>
-
-        <Card className="summary-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600, textTransform: 'uppercase' }}>
-                Cash in Hand
-              </span>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text, #111827)', marginTop: '4px' }}>
-                {money(balances.Cash / 100)}
-              </div>
-              <small style={{ color: 'var(--text-muted, #9ca3af)', fontSize: '0.75rem' }}>Operating cash ledger</small>
-            </div>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: '8px',
-                background: 'rgba(99, 102, 241, 0.1)',
-                color: '#6366f1',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Banknote size={20} />
-            </div>
-          </div>
-        </Card>
-
-        <Card className="summary-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600, textTransform: 'uppercase' }}>
-                Bank Balance
-              </span>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text, #111827)', marginTop: '4px' }}>
-                {money(balances.Bank / 100)}
-              </div>
-              <small style={{ color: 'var(--text-muted, #9ca3af)', fontSize: '0.75rem' }}>Primary bank account</small>
-            </div>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: '8px',
-                background: 'rgba(14, 165, 233, 0.1)',
-                color: '#0ea5e9',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Building size={20} />
-            </div>
-          </div>
-        </Card>
       </div>
 
       {/* Tabs */}
@@ -732,7 +592,7 @@ export default function Payments({ id }: { id?: string }) {
           ) : vouchers.length === 0 ? (
             <Empty
               title="No payment vouchers found"
-              text="Record an outgoing cash or bank expense payment to create your first voucher."
+              text="Record an outgoing business payment to create your first voucher."
               action={
                 <Btn onClick={() => setRecordVoucherOpen(true)}>
                   <Plus size={16} /> Record payment voucher
@@ -748,7 +608,7 @@ export default function Payments({ id }: { id?: string }) {
                     <th style={{ padding: '0.65rem 0.75rem' }}>Date</th>
                     <th style={{ padding: '0.65rem 0.75rem' }}>Paid To</th>
                     <th style={{ padding: '0.65rem 0.75rem' }}>Purpose</th>
-                    <th style={{ padding: '0.65rem 0.75rem' }}>Account / Method</th>
+                    <th style={{ padding: '0.65rem 0.75rem' }}>Payment Method</th>
                     <th style={{ padding: '0.65rem 0.75rem', textAlign: 'right' }}>Amount</th>
                     <th style={{ padding: '0.65rem 0.75rem', textAlign: 'center' }}>Actions</th>
                   </tr>
@@ -779,7 +639,7 @@ export default function Payments({ id }: { id?: string }) {
                           )}
                         </td>
                         <td style={{ padding: '0.65rem 0.75rem' }}>
-                          <Badge>{v.account}: {v.method}</Badge>
+                          <Badge>{v.method || 'Cash'}</Badge>
                         </td>
                         <td style={{ padding: '0.65rem 0.75rem', textAlign: 'right', fontWeight: 700, color: 'var(--danger, #dc2626)' }}>
                           {money(amt)}
@@ -831,7 +691,7 @@ export default function Payments({ id }: { id?: string }) {
           onSuccess={(receipt) => {
             setRecordReceiptOpen(false);
             loadReceipts();
-            refreshBalances();
+            refreshSummary();
             setPreviewReceipt(receipt);
           }}
         />
@@ -841,12 +701,11 @@ export default function Payments({ id }: { id?: string }) {
       {recordVoucherOpen && (
         <RecordVoucherModal
           isOpen={recordVoucherOpen}
-          availableBalances={balances}
           onClose={() => setRecordVoucherOpen(false)}
           onSuccess={(voucher) => {
             setRecordVoucherOpen(false);
             loadVouchers();
-            refreshBalances();
+            refreshSummary();
             setPreviewVoucher(voucher);
           }}
         />
@@ -899,6 +758,7 @@ export function RecordReceiptModal({
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [idempotencyKey] = useState(() => `rcpt-idem-${Date.now()}-${uid('K')}`);
+  const [invoiceSearchQuery, setInvoiceSearchQuery] = useState('');
 
   // Fetch unpaid invoices when customer changes
   useEffect(() => {
@@ -935,13 +795,15 @@ export function RecordReceiptModal({
       .then(async (res) => {
         if (!res.ok) throw new Error('Failed to load receivables.');
         const data = await res.json();
-        const rows = (data.invoices || []).map((inv: any) => ({
-          id: inv._id || inv.id,
-          invoiceNumber: inv.invoiceNumber || inv.id,
-          date: inv.date || inv.invoiceDate,
-          grandTotalPaise: inv.grandTotalPaise || Math.round((inv.total || 0) * 100),
-          duePaise: inv.duePaise || Math.round((inv.due || 0) * 100),
-        }));
+        const rows = (data.receivables || [])
+          .filter((item: any) => item.targetType === 'Invoice')
+          .map((inv: any) => ({
+            id: inv.targetId || inv.id,
+            invoiceNumber: inv.reference || inv.targetId || inv.id,
+            date: inv.date,
+            grandTotalPaise: inv.originalAmountPaise || 0,
+            duePaise: inv.remainingDuePaise || 0,
+          }));
         setInvoices(rows);
       })
       .catch((err) => {
@@ -1337,98 +1199,49 @@ export function RecordReceiptModal({
 // Record Outgoing Payment Voucher Modal
 // -------------------------------------------------------------
 export function RecordVoucherModal({
-  isOpen,
-  availableBalances,
+  isOpen: _isOpen,
   onClose,
   onSuccess,
 }: {
   isOpen: boolean;
-  availableBalances: { Cash: number; Bank: number };
   onClose: () => void;
   onSuccess: (voucher: any) => void;
 }) {
-  const { createPaymentVoucherApi, notify } = useStore();
-
+  const {createPaymentVoucherApi, notify} = useStore();
   const [date, setDate] = useState(TODAY);
   const [payeeName, setPayeeName] = useState('');
   const [amountStr, setAmountStr] = useState('');
-  const [account, setAccount] = useState<'Cash' | 'Bank'>('Cash');
   const [method, setMethod] = useState<'Cash' | 'UPI' | 'BankTransfer' | 'Card' | 'Cheque'>('Cash');
   const [purpose, setPurpose] = useState('');
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [idempotencyKey] = useState(() => `pv-idem-${Date.now()}-${uid('K')}`);
+  const payingPaise = Math.round((parseFloat(amountStr) || 0) * 100);
 
-  function handleAccountChange(acc: 'Cash' | 'Bank') {
-    setAccount(acc);
-    if (acc === 'Cash') {
-      setMethod('Cash');
-    } else {
-      if (method === 'Cash') setMethod('BankTransfer');
-    }
-  }
-
-  function handleMethodChange(m: 'Cash' | 'UPI' | 'BankTransfer' | 'Card' | 'Cheque') {
-    setMethod(m);
-    if (m === 'Cash') {
-      setAccount('Cash');
-    } else {
-      setAccount('Bank');
-    }
-  }
-
-  const parsedAmountRupees = parseFloat(amountStr) || 0;
-  const payingPaise = Math.round(parsedAmountRupees * 100);
-  const availablePaise = availableBalances[account] || 0;
-  const isInsufficient = payingPaise > availablePaise;
-  const isValidAmount = payingPaise > 0 && !isInsufficient;
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!payeeName.trim()) {
-      notify('Enter payee name.');
-      return;
-    }
-    if (!purpose.trim()) {
-      notify('Enter purpose of payment.');
-      return;
-    }
-    if (payingPaise <= 0) {
-      notify('Enter a positive payment amount.');
-      return;
-    }
-    if (isInsufficient) {
-      notify(`Insufficient ${account.toLowerCase()} balance. Available: ${money(availablePaise / 100)}`);
-      return;
-    }
-
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!payeeName.trim()) return notify('Enter payee name.');
+    if (!purpose.trim()) return notify('Enter purpose of payment.');
+    if (payingPaise <= 0) return notify('Enter a positive payment amount.');
     setBusy(true);
     try {
       const payload = {
         date,
         payeeName: payeeName.trim(),
         amountPaise: payingPaise,
-        account,
         method,
         purpose: purpose.trim(),
         reference: reference.trim(),
         notes: notes.trim(),
         idempotencyKey,
       };
-
       const result = await createPaymentVoucherApi(payload);
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to record payment voucher.');
-      }
-
+      if (!result.success) throw new Error(result.error || 'Failed to record payment voucher.');
       notify('Payment voucher created successfully.');
-      onSuccess(result.voucher || {
-        ...payload,
-        voucherNumber: `PV-${Date.now().toString().slice(-4)}`,
-      });
-    } catch (err: any) {
-      notify(err.message || 'Error recording payment voucher.');
+      onSuccess(result.voucher || {...payload, voucherNumber: `PV-${Date.now().toString().slice(-4)}`});
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Error recording payment voucher.');
     } finally {
       setBusy(false);
     }
@@ -1436,208 +1249,46 @@ export function RecordVoucherModal({
 
   return (
     <Modal title="Record Payment Voucher" onClose={onClose} wide>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+      <form onSubmit={handleSubmit} className="voucher-form">
+        <div className="voucher-form-grid">
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-              Voucher Date <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
-            </label>
-            <input
-              type="date"
-              value={date}
-              required
-              onChange={(e) => setDate(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.65rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border, #d1d5db)',
-                fontSize: '0.9rem',
-              }}
-            />
+            <label className="voucher-field-label">Voucher Date <span>*</span></label>
+            <input type="date" value={date} required onChange={(event) => setDate(event.target.value)} />
           </div>
-
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-              Paid To (Payee Name) <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Paper Vendor, Landlord, Technician"
-              value={payeeName}
-              onChange={(e) => setPayeeName(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.65rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border, #d1d5db)',
-                fontSize: '0.9rem',
-              }}
-            />
+            <label className="voucher-field-label">Paid To (Payee Name) <span>*</span></label>
+            <input type="text" required placeholder="e.g. Transport charges, Landlord, Technician" value={payeeName} onChange={(event) => setPayeeName(event.target.value)} />
           </div>
-        </div>
-
-        {/* Account and Method */}
-        <div
-          style={{
-            padding: '1rem',
-            background: 'var(--surface-muted, #f9fafb)',
-            borderRadius: '8px',
-            border: '1px solid var(--border, #e5e7eb)',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '1rem',
-          }}
-        >
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-              Disbursement Account <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
-            </label>
-            <select
-              value={account}
-              onChange={(e) => handleAccountChange(e.target.value as any)}
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.65rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border, #d1d5db)',
-                fontSize: '0.9rem',
-              }}
-            >
-              <option value="Cash">Cash (Available: {money(availableBalances.Cash / 100)})</option>
-              <option value="Bank">Bank (Available: {money(availableBalances.Bank / 100)})</option>
+            <label className="voucher-field-label">Payment Method <span>*</span></label>
+            <select value={method} onChange={(event) => setMethod(event.target.value as typeof method)}>
+              <option value="Cash">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="BankTransfer">Bank Transfer / NEFT / IMPS</option>
+              <option value="Card">Card</option>
+              <option value="Cheque">Cheque</option>
             </select>
           </div>
-
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-              Payment Method <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
-            </label>
-            <select
-              value={method}
-              onChange={(e) => handleMethodChange(e.target.value as any)}
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.65rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border, #d1d5db)',
-                fontSize: '0.9rem',
-              }}
-            >
-              {account === 'Cash' ? (
-                <option value="Cash">Cash</option>
-              ) : (
-                <>
-                  <option value="BankTransfer">Bank Transfer / NEFT / IMPS</option>
-                  <option value="UPI">UPI</option>
-                  <option value="Card">Card</option>
-                  <option value="Cheque">Cheque</option>
-                </>
-              )}
-            </select>
+            <label className="voucher-field-label">Amount (₹) <span>*</span></label>
+            <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={amountStr} onChange={(event) => setAmountStr(event.target.value)} />
           </div>
-
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-              Amount (₹) <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0.01"
-              required
-              placeholder="0.00"
-              value={amountStr}
-              onChange={(e) => setAmountStr(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.65rem',
-                borderRadius: '6px',
-                border: isInsufficient ? '1px solid var(--danger, #ef4444)' : '1px solid var(--border, #d1d5db)',
-                fontSize: '1rem',
-                fontWeight: 700,
-              }}
-            />
-            {isInsufficient && (
-              <small style={{ color: 'var(--danger, #ef4444)', fontWeight: 600, display: 'block', marginTop: '4px' }}>
-                Insufficient {account.toLowerCase()} balance. Available: {money(availablePaise / 100)}
-              </small>
-            )}
+            <label className="voucher-field-label">Purpose / Expense Category <span>*</span></label>
+            <input type="text" required placeholder="e.g. Transport, rent, machine service" value={purpose} onChange={(event) => setPurpose(event.target.value)} />
+          </div>
+          <div>
+            <label className="voucher-field-label">External Reference</label>
+            <input type="text" placeholder="Bill number, UPI reference or cheque number" value={reference} onChange={(event) => setReference(event.target.value)} />
+          </div>
+          <div className="voucher-form-full">
+            <label className="voucher-field-label">Notes / Remarks</label>
+            <textarea rows={3} placeholder="Optional payment details" value={notes} onChange={(event) => setNotes(event.target.value)} />
           </div>
         </div>
-
-        {/* Purpose and Reference */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-              Purpose / Expense Category <span style={{ color: 'var(--danger, #ef4444)' }}>*</span>
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Workshop rent, Printing plate supplies, Courier charges"
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.65rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border, #d1d5db)',
-                fontSize: '0.9rem',
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-              External Reference
-            </label>
-            <input
-              type="text"
-              placeholder="UTR #, Cheque #, Bill ref"
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.65rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border, #d1d5db)',
-                fontSize: '0.9rem',
-              }}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-            Notes / Remarks
-          </label>
-          <textarea
-            rows={2}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Optional voucher notes..."
-            style={{
-              width: '100%',
-              padding: '0.45rem 0.65rem',
-              borderRadius: '6px',
-              border: '1px solid var(--border, #d1d5db)',
-              fontSize: '0.88rem',
-            }}
-          />
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-          <Btn secondary onClick={onClose} disabled={busy}>
-            Cancel
-          </Btn>
-          <Btn
-            type="submit"
-            disabled={busy || !payeeName.trim() || !purpose.trim() || !isValidAmount}
-          >
-            {busy ? 'Recording...' : 'Record Payment Voucher'}
-          </Btn>
+        <div className="form-actions">
+          <Btn secondary onClick={onClose} disabled={busy}>Cancel</Btn>
+          <Btn type="submit" disabled={busy || payingPaise <= 0}>{busy ? 'Recording…' : 'Record Payment Voucher'}</Btn>
         </div>
       </form>
     </Modal>
@@ -1908,7 +1559,7 @@ export function VoucherPreviewModal({
       >
         <div style={{ textAlign: 'center', borderBottom: '2px solid #111827', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
           <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, letterSpacing: '2px' }}>PAYMENT VOUCHER</h1>
-          <small style={{ color: '#4b5563', fontSize: '0.8rem', textTransform: 'uppercase' }}>Outgoing Cash / Bank Disbursement</small>
+          <small style={{ color: '#4b5563', fontSize: '0.8rem', textTransform: 'uppercase' }}>Payment confirmation</small>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '1.5rem', marginBottom: '1.25rem' }}>
@@ -1926,8 +1577,7 @@ export function VoucherPreviewModal({
           <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '1rem', fontSize: '0.85rem', lineHeight: '1.6' }}>
             <div><strong>Voucher No:</strong> {vNum}</div>
             <div><strong>Date:</strong> {vDate}</div>
-            <div><strong>Debit Account:</strong> {voucher.account || 'Bank'}</div>
-            <div><strong>Payment Mode:</strong> {voucher.method || 'BankTransfer'}</div>
+            <div><strong>Payment Method:</strong> {voucher.method || 'Cash'}</div>
             <div><strong>Reference / UTR:</strong> {voucher.reference || 'N/A'}</div>
           </div>
         </div>

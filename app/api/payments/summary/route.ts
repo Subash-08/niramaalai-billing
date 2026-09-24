@@ -1,7 +1,6 @@
 import {endpoint, requireIdentity} from '@/server/auth';
 import {database} from '@/server/db';
 import {col} from '@/server/purchase-service';
-import {getTenantAccountBalances} from '@/server/payment-voucher-service';
 
 export const runtime = 'nodejs';
 
@@ -26,7 +25,7 @@ export async function GET(request: Request) {
       voucherFilter.date = dateRange;
     }
 
-    const [receiptAgg, voucherAgg, balances] = await Promise.all([
+    const [receiptAgg, voucherAgg] = await Promise.all([
       col(db, 'customerReceipts').aggregate([
         {$match: receiptFilter},
         {$group: {_id: null, totalReceivedPaise: {$sum: '$totalAmountPaise'}, count: {$sum: 1}}},
@@ -35,7 +34,6 @@ export async function GET(request: Request) {
         {$match: voucherFilter},
         {$group: {_id: null, totalPaidPaise: {$sum: '$amountPaise'}, count: {$sum: 1}}},
       ]).toArray(),
-      getTenantAccountBalances(db, identity).catch(() => ({Cash: 0, Bank: 0})),
     ]);
 
     return {
@@ -43,8 +41,6 @@ export async function GET(request: Request) {
       totalPaidPaise: voucherAgg[0]?.totalPaidPaise || 0,
       receiptCount: receiptAgg[0]?.count || 0,
       voucherCount: voucherAgg[0]?.count || 0,
-      cashBalancePaise: balances.Cash || 0,
-      bankBalancePaise: balances.Bank || 0,
     };
   });
 }

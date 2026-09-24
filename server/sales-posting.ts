@@ -117,19 +117,10 @@ export async function settleInvoiceOnIssue(db: Db, identity: Identity, session: 
   if (paymentTotal > 0) {
     receiptId = uid('RCP');
     const receiptNumber = await nextTenantSequence(db, tenantId, 'Receipt', year, 'RCP', session);
-    const components = [];
-    for (const component of input.paymentComponents) {
-      const movementId = uid('ACM');
-      const balance = await col(db, 'tenantAccountBalances').updateOne({tenantId, account: component.account,
-        balancePaise: {$gte: 0, $lte: Number.MAX_SAFE_INTEGER - component.amountPaise}},
-        {$inc: {balancePaise: component.amountPaise, version: 1}, $set: {updatedAt: now}}, {session});
-      if (balance.matchedCount !== 1) throw new AppError(409, `${component.account} balance missing or outside the supported range.`);
-      await col(db, 'accountMovements').insertOne({_id: movementId, tenantId, account: component.account,
-        date, qty: component.amountPaise, reason: 'Customer receipt', reference: receiptNumber,
-        sourceType: 'CustomerReceipt', sourceId: receiptId, invoiceId: invoice._id,
-        createdAt: now, createdBy: identity.userId}, {session});
-      components.push({...component, componentId: uid('CMP'), movementId});
-    }
+    const components = input.paymentComponents.map(component => ({
+      ...component,
+      componentId: uid('CMP'),
+    }));
 
     let advanceId: string | undefined;
     if (excessPaise > 0) {

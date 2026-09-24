@@ -47,7 +47,7 @@ import { Truck } from 'lucide-react';
 import { PersonForm } from './people';
 import { InvoiceTemplate } from '@/lib/extensions';
 import { TemplateInvoice as InvoicePaper, PrintDialog } from './templates';
-import { mapPurchaseFromApi, mapInvoiceFromApi, mapQuotationFromApi, mapTemplateFromApi } from '@/lib/mappers';
+import { mapPurchaseFromApi, mapInvoiceFromApi, mapQuotationFromApi, mapTemplateFromApi, mapProductFromApi, mapServiceFromApi } from '@/lib/mappers';
 import {
   IssueInvoiceModal,
   InvoiceCancelModal,
@@ -179,6 +179,9 @@ export function DocumentComposer({
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerChoices, setCustomerChoices] = useState(state.customers);
   const [productChoices, setProductChoices] = useState(state.products);
+  const [serviceChoices, setServiceChoices] = useState(state.serviceCatalog);
+  const [selectedProductItem, setSelectedProductItem] = useState<any>(null);
+  const [selectedServiceItem, setSelectedServiceItem] = useState<any>(null);
   const [serialIndex, setSerialIndex] = useState<number | null>(null);
   const [serialText, setSerialText] = useState('');
   const [newPerson, setNewPerson] = useState(false);
@@ -1211,21 +1214,21 @@ export function DocumentComposer({
 
       <div className="stack">
         <Card
-          title={purchase ? 'Supplier and purchase details' : 'Customer and document details'}
+          title="Customer and document details"
           actions={
             <Btn secondary onClick={() => setNewPerson(true)}>
               <Plus size={14} />
-              {purchase ? 'Add supplier' : 'Add customer'}
+              Add customer
             </Btn>
           }
         >
           <div className="form-body form-grid">
             <div className="field">
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-                {purchase ? 'Supplier *' : 'Customer *'}
+                Customer *
               </label>
               <SearchSelect
-                placeholder={purchase ? 'Search supplier by name, phone, GST...' : 'Search customer by name, phone, GST...'}
+                placeholder="Search customer by name, phone, GST..."
                 value={customerId}
                 selectedLabel={person?.name}
                 options={(purchase ? supplierChoices : (isLive ? customerChoices : state.customers)).map((c: any) => ({
@@ -1357,7 +1360,7 @@ export function DocumentComposer({
             ) : (
               <Field label="Invoice content">
                 <input readOnly value="Products and services" />
-                <span className="muted">Add any combination of stock products, printing services and custom charges.</span>
+                <span className="muted">Add any combination of catalogue products, printing services and custom charges.</span>
               </Field>
             )}
 
@@ -1490,7 +1493,7 @@ export function DocumentComposer({
         </Card>
 
         <Card
-          title={purchase ? 'Purchase items' : 'Invoice items'}
+          title="Invoice items"
           sub={
             inclusive
               ? 'Rates include GST. Discounts apply before tax; charges use their own editable GST rate.'
@@ -1809,7 +1812,7 @@ export function DocumentComposer({
                 Add custom service line
               </Btn>
             )}
-            <span className="muted">A custom charge is financial only and never adds or removes inventory. Create an inventory product first when selling a physical item.</span>
+            <span className="muted">A custom charge is financial only. Select a catalogue product or service above for standard line items.</span>
           </div>
         </Card>
 
@@ -2660,7 +2663,7 @@ export default function Documents({
       {record && (
         <Link className="back-link" href={path}>
           <ArrowLeft size={14} />
-          All {purchase ? 'purchases' : quotation ? 'quotations' : 'invoices'}
+          All invoices
         </Link>
       )}
 
@@ -2801,7 +2804,7 @@ export default function Documents({
               )}
               <Link href={path + '/new'} className="btn">
                 <Plus size={16} />
-                New {purchase ? 'purchase' : quotation ? 'quotation' : 'invoice'}
+                New invoice
               </Link>
             </>
           )

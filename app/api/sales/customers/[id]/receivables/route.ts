@@ -4,7 +4,7 @@ import {col} from '@/server/purchase-service';
 
 export const runtime = 'nodejs';
 
-export async function GET(request: Request, context: {params: Promise<{id: string}>}) {
+export async function GET(_request: Request, context: {params: Promise<{id: string}>}) {
   return endpoint(async () => {
     const identity = await requireIdentity();
     const {id} = await context.params;
@@ -12,37 +12,21 @@ export async function GET(request: Request, context: {params: Promise<{id: strin
     const tenantId = identity.tenantId;
 
     const customer = await col(db, 'customers').findOne({_id: id, tenantId});
-    if (!customer) {
-      return {receivables: [], advances: [], totalDuePaise: 0, availableAdvancePaise: 0};
-    }
+    if (!customer) return {receivables: [], totalDuePaise: 0};
 
-    const [openings, invoices, advances] = await Promise.all([
-      col(db, 'openingReceivables')
-        .find({
-          tenantId,
-          customerId: id,
-          remainingAmountPaise: {$gt: 0},
-          status: {$nin: ['Settled', 'Cancelled']},
-        })
-        .toArray(),
-      col(db, 'invoices')
-        .find({
-          tenantId,
-          customerId: id,
-          status: 'Issued',
-          duePaise: {$gt: 0},
-        })
-        .sort({invoiceDate: 1, createdAt: 1})
-        .toArray(),
-      col(db, 'customerAdvances')
-        .find({
-          tenantId,
-          customerId: id,
-          status: {$in: ['Available', 'PartlyConsumed']},
-          remainingAmountPaise: {$gt: 0},
-        })
-        .sort({date: 1, createdAt: 1})
-        .toArray(),
+    const [openings, invoices] = await Promise.all([
+      col(db, 'openingReceivables').find({
+        tenantId,
+        customerId: id,
+        remainingAmountPaise: {$gt: 0},
+        status: {$nin: ['Settled', 'Cancelled']},
+      }).toArray(),
+      col(db, 'invoices').find({
+        tenantId,
+        customerId: id,
+        status: 'Issued',
+        duePaise: {$gt: 0},
+      }).sort({invoiceDate: 1, createdAt: 1}).toArray(),
     ]);
 
     const receivables = [
@@ -68,25 +52,10 @@ export async function GET(request: Request, context: {params: Promise<{id: strin
       })),
     ];
 
-    const totalDuePaise = receivables.reduce((sum, r) => sum + r.remainingDuePaise, 0);
-    const availableAdvancePaise = advances.reduce((sum, a) => sum + a.remainingAmountPaise, 0);
-
     return {
-      customer: {
-        id: customer._id,
-        name: customer.name,
-        phone: customer.phone,
-      },
+      customer: {id: customer._id, name: customer.name, phone: customer.phone},
       receivables,
-      advances: advances.map(a => ({
-        id: a._id,
-        advanceNumber: a.advanceNumber,
-        date: a.date,
-        originalAmountPaise: a.originalAmountPaise,
-        remainingAmountPaise: a.remainingAmountPaise,
-      })),
-      totalDuePaise,
-      availableAdvancePaise,
+      totalDuePaise: receivables.reduce((sum, item) => sum + item.remainingDuePaise, 0),
     };
   });
 }

@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test": "tsc --project tsconfig.test.json && node --test tests/domain.test.mjs",
     "test:core": "tsc --project tsconfig.core-tests.json && node --conditions=react-server --test tests/billing-core.test.cjs tests/payments-no-stock.test.cjs",
-    "account:approve": "node scripts/approve-account.mjs"
+    "account:approve": "node scripts/approve-account.mjs",
+    "verify:atlas": "node --env-file=.env.local scripts/verify-atlas.mjs",
+    "verify:production": "node --env-file=.env.local scripts/verify-production.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.4",
@@ -18,19 +20,19 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "jszip": "^3.10.2",
-    "lucide-react": "latest",
+    "lucide-react": "1.44.0",
     "mongodb": "^7.6.0",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "next": "16.3.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "server-only": "^0.0.1",
     "zod": "^4.6.2"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "typescript": "latest"
+    "@types/node": "22.20.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2"
   },
   "overrides": {
     "exceljs": {

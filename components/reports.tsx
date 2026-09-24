@@ -3,11 +3,10 @@ import ExportButtons from './export-buttons';
 import {useState, useEffect, useCallback} from 'react';
 import Link from 'next/link';
 import {Download, Printer, ArrowUpRight, BarChart3, LockKeyhole} from 'lucide-react';
-import {TODAY, money, roundedTotal, balance, available, credits, paid, totals, lineTotal} from '@/lib/domain';
+import {TODAY, money, roundedTotal, balance, paid, totals, lineTotal} from '@/lib/domain';
 import {useStore} from './store';
 import {PageHead, Card, Btn, Modal, Field, Empty, csvDownload} from './ui';
 import {PrintDialog} from './templates';
-import {InvoicePaper} from './documents';
 
 const reportNames = [
   'Sales',

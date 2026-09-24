@@ -543,7 +543,7 @@ export default function Inventory({ id }: { id?: string }) {
     <div className="inventory-page" style={{ padding: '0 0 3rem 0' }}>
       <PageHead
         title="Products"
-        description="Catalogue products for customer invoices and billing calculations. Selectable line items without inventory tracking."
+        description="Catalogue products for customer invoices and billing calculations."
         actions={
           <Btn onClick={() => setCreatingProduct(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Plus size={16} /> Add product
