@@ -32,8 +32,21 @@ function normalizeOrigin(rawUrl: string, name: string): string {
 }
 
 export function getCanonicalOrigin(): string {
-  const appOriginRaw = process.env.APP_ORIGIN;
-  const betterAuthUrlRaw = process.env.BETTER_AUTH_URL;
+  let appOriginRaw = process.env.APP_ORIGIN;
+  let betterAuthUrlRaw = process.env.BETTER_AUTH_URL;
+
+  // On Vercel deployments, if environment variables contain legacy localhost values,
+  // resolve them to the actual Vercel HTTPS production origin.
+  if (process.env.VERCEL) {
+    const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL || 'niramaalai-billing.vercel.app';
+    const vercelHttps = `https://${vercelHost}`;
+    if (!appOriginRaw || appOriginRaw.includes('localhost') || !appOriginRaw.startsWith('https://')) {
+      appOriginRaw = vercelHttps;
+    }
+    if (!betterAuthUrlRaw || betterAuthUrlRaw.includes('localhost') || !betterAuthUrlRaw.startsWith('https://')) {
+      betterAuthUrlRaw = vercelHttps;
+    }
+  }
 
   if (appOriginRaw && betterAuthUrlRaw) {
     const appNorm = normalizeOrigin(appOriginRaw, 'APP_ORIGIN');
@@ -61,6 +74,12 @@ export function getTrustedOrigins(): string[] {
   const allowed = new Set<string>();
   const canonical = getCanonicalOrigin();
   allowed.add(canonical);
+
+  if (process.env.VERCEL) {
+    if (process.env.VERCEL_URL) allowed.add(`https://${process.env.VERCEL_URL}`);
+    if (process.env.VERCEL_PROJECT_PRODUCTION_URL) allowed.add(`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`);
+    allowed.add('https://niramaalai-billing.vercel.app');
+  }
 
   // Additional approved origins (e.g. approved custom domains or preview deployments)
   const additional = process.env.ADDITIONAL_ALLOWED_ORIGINS || '';
