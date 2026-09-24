@@ -1,0 +1,5 @@
+'use client';
+import {useState} from 'react';
+import {Btn} from './ui';
+import {useStore} from './store';
+export default function ExportButtons({title,headers,rows,description='',disabled=false}:{title:string;headers:string[];rows:(string|number)[][];description?:string;disabled?:boolean}){const {notify}=useStore();const [busy,setBusy]=useState('');async function save(type:'pdf'|'xlsx'){setBusy(type);try{const e=await import('@/lib/exports');const bytes=type==='pdf'?await e.reportPdfBytes(title,headers,rows,description):await e.workbookBytes(title,headers,rows,description);e.downloadBytes(title+'.'+type,bytes,type==='pdf'?'application/pdf':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');notify('Downloaded '+rows.length+' matching records.');}catch(error){notify(error instanceof Error?error.message:'Export failed. Try a smaller selection.');}finally{setBusy('');}}return <><Btn secondary disabled={disabled||!!busy||!rows.length} onClick={()=>save('xlsx')}>{busy==='xlsx'?'Preparing…':'Download Excel'}</Btn><Btn secondary disabled={disabled||!!busy||!rows.length} onClick={()=>save('pdf')}>{busy==='pdf'?'Preparing…':'Download PDF'}</Btn></>;}

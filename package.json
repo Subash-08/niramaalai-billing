@@ -1,0 +1,40 @@
+{
+  "name": "print-billing-software",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack --hostname 127.0.0.1",
+    "build": "next build --webpack",
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --project tsconfig.test.json && node --test tests/domain.test.mjs",
+    "test:core": "tsc --project tsconfig.core-tests.json && node --conditions=react-server --test tests/billing-core.test.cjs tests/payments-no-stock.test.cjs",
+    "account:approve": "node scripts/approve-account.mjs"
+  },
+  "dependencies": {
+    "better-auth": "^1.7.4",
+    "exceljs": "^4.4.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
+    "jszip": "^3.10.2",
+    "lucide-react": "latest",
+    "mongodb": "^7.6.0",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
+  }
+}

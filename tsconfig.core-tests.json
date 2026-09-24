@@ -1,0 +1,5 @@
+{
+  "compilerOptions": {"target":"ES2022","module":"Node16","moduleResolution":"Node16","outDir":".billing-test","rootDir":".","strict":true,"skipLibCheck":true,"esModuleInterop":true,"types":["node"]},
+  "include":["server/sales-schema.ts","server/sales-calculations.ts","server/print-job-service.ts","lib/mappers.ts","server/payment-voucher-service.ts","server/customer-ledger.ts","server/sales-service.ts"]
+}
+
