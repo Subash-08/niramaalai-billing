@@ -2668,7 +2668,13 @@ export default function Documents({
       )}
 
       <PageHead
-        title={record?.id || (purchase ? 'Purchases' : quotation ? 'Quotations' : 'Sales & invoices')}
+        title={record
+          ? (purchase
+              ? ((record as Purchase).purchaseNumber || record.id)
+              : quotation
+                ? ((record as any).quotationNumber || record.id)
+                : ((record as any).invoiceNumber || record.id))
+          : (purchase ? 'Purchases' : quotation ? 'Quotations' : 'Sales & invoices')}
         description={
           record
             ? `${customer?.name || 'Unknown'} · ${dateLabel(record.date)}`
@@ -2959,17 +2965,23 @@ export default function Documents({
             {!quotation && (
               <>
                 <span>
-                  Paid <b>{money(paid(state, record.id))}</b>
+                  Paid <b>{money(isLive && (record as any).paidAmount != null ? (record as any).paidAmount : paid(state, record.id))}</b>
                 </span>
                 <span>
-                  Balance <b>{money(balance(state, record))}</b>
+                  Balance <b>{money(isLive && (record as any).dueAmount != null ? (record as any).dueAmount : balance(state, record))}</b>
                 </span>
                 <Badge>
-                  {balance(state, record) === 0
+                  {(record as any).paymentStatus === 'PartlyPaid'
+                    ? 'Partly paid'
+                    : (record as any).paymentStatus === 'Paid'
                     ? 'Paid'
-                    : paid(state, record.id) > 0
-                      ? 'Partly paid'
-                      : 'Unpaid'}
+                    : (record as any).paymentStatus === 'Unpaid'
+                      ? 'Unpaid'
+                      : (isLive && (record as any).dueAmount != null ? (record as any).dueAmount === 0 : balance(state, record) === 0)
+                        ? 'Paid'
+                        : (isLive && (record as any).paidAmount != null ? (record as any).paidAmount > 0 : paid(state, record.id) > 0)
+                          ? 'Partly paid'
+                          : 'Unpaid'}
                 </Badge>
               </>
             )}
@@ -3346,20 +3358,27 @@ export default function Documents({
                     </tr>
                   </thead>
                   <tbody>
-                    {state.payments
-                      .filter((p) => p.reference === record.id)
-                      .map((p) => (
-                        <tr key={p.id}>
-                          <td>{p.date}</td>
-                          <td>{p.account}</td>
-                          <td>{p.purpose}</td>
-                          <td>{money(p.amount)}</td>
-                        </tr>
-                      ))}
+                    {(detailData?.receipts?.length
+                      ? detailData.receipts.map((receipt: any) => ({
+                          id: receipt._id || receipt.id,
+                          date: receipt.date,
+                          account: receipt.components?.[0]?.account || 'Cash',
+                          purpose: `${receipt.receiptNumber || 'Receipt'} · ${receipt.components?.[0]?.method || 'Cash'}`,
+                          amount: (receipt.totalAmountPaise || 0) / 100,
+                        }))
+                      : state.payments.filter((p) => p.reference === record.id)
+                    ).map((p: any) => (
+                      <tr key={p.id}>
+                        <td>{p.date}</td>
+                        <td>{p.account}</td>
+                        <td>{p.purpose}</td>
+                        <td>{money(p.amount)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-              {!state.payments.some((p) => p.reference === record.id) && (
+              {!detailData?.receipts?.length && !state.payments.some((p) => p.reference === record.id) && (
                 <Empty
                   title="No payments recorded"
                   text="Recorded customer payments for this invoice will appear here."
@@ -3380,7 +3399,17 @@ export default function Documents({
           </div>
         </>
       ) : (
+        <>
+        {!quotation && !purchase && (
+          <div className="tabs" aria-label="Invoice views" style={{marginBottom: '1rem'}}>
+            <button type="button" className={status !== 'Unpaid' ? 'active' : ''} onClick={() => setStatus('All')}>All invoices</button>
+            <button type="button" className={status === 'Unpaid' ? 'active' : ''} onClick={() => setStatus('Unpaid')}>Outstanding</button>
+          </div>
+        )}
         <Card>
+          {!quotation && !purchase && status === 'Unpaid' && (
+            <div className="body-pad notice" style={{margin: 12}}><strong>Outstanding invoices</strong> — only issued invoices with a balance due are shown.</div>
+          )}
           <div className="toolbar" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
             <SearchBox value={q} onChange={setQ} placeholder="Search document or customer…" />
 
@@ -3439,9 +3468,9 @@ export default function Documents({
                 <option value="All">All statuses</option>
                 {(quotation
                   ? ['Draft', 'Shared', 'Converted', 'Expired', 'Cancelled']
-                  : ['Draft', 'Issued', 'Paid', 'Unpaid', 'Cancelled']
+                  : ['Draft', 'Issued', 'Paid', 'PartlyPaid', 'Unpaid', 'Cancelled']
                 ).map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={s}>{s === 'Unpaid' ? 'Outstanding' : s === 'PartlyPaid' ? 'Partly paid' : s}</option>
                 ))}
               </select>
             )}
@@ -3538,6 +3567,12 @@ export default function Documents({
                             ? b.status
                             : b.status === 'Draft'
                               ? 'Draft'
+                              : (b as any).paymentStatus === 'PartlyPaid'
+                                ? 'Partly paid'
+                              : (b as any).paymentStatus === 'Paid'
+                                ? 'Paid'
+                              : (b as any).paymentStatus === 'Unpaid'
+                                ? 'Unpaid'
                               : (isLive && (b as any).dueAmount != null ? (b as any).dueAmount === 0 : balance(state, b) === 0)
                                 ? 'Paid'
                                 : (isLive && (b as any).paidAmount != null ? (b as any).paidAmount > 0 : paid(state, b.id) > 0)
@@ -3601,6 +3636,7 @@ export default function Documents({
             )}
           </div>
         </Card>
+        </>
       )}
 
       {/* Reversal Reason Modal */}

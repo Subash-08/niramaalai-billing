@@ -178,7 +178,7 @@ export default function Dashboard() {
       <section className="dashboard-content-grid">
         <Card title="Recent invoices" sub="Latest invoices issued to customers" actions={<Link className="text-link" href="/sales">View all <ChevronRight size={14}/></Link>}>
           <div className="table-wrap"><table className="dashboard-table"><thead><tr><th>Invoice</th><th>Customer</th><th>Total</th><th>Due</th><th>Status</th></tr></thead><tbody>
-            {data.recentInvoices.map(invoice => <tr key={invoice.id}><td><Link className="record-link" href={`/sales/${invoice.id}`}>{invoice.invoiceNumber}</Link><small>{invoice.date}</small></td><td>{invoice.customerName}</td><td className="amount">{money(invoice.totalPaise / 100)}</td><td className={invoice.duePaise > 0 ? 'dashboard-due' : ''}>{money(invoice.duePaise / 100)}</td><td><Badge>{invoice.duePaise === 0 ? 'Paid' : 'Unpaid'}</Badge></td></tr>)}
+            {data.recentInvoices.map(invoice => <tr key={invoice.id}><td><Link className="record-link" href={`/sales/${invoice.id}`}>{invoice.invoiceNumber}</Link><small>{invoice.date}</small></td><td>{invoice.customerName}</td><td className="amount">{money(invoice.totalPaise / 100)}</td><td className={invoice.duePaise > 0 ? 'dashboard-due' : ''}>{money(invoice.duePaise / 100)}</td><td><Badge>{invoice.paymentStatus === 'PartlyPaid' ? 'Partly paid' : invoice.paymentStatus || (invoice.duePaise === 0 ? 'Paid' : invoice.duePaise < invoice.totalPaise ? 'Partly paid' : 'Unpaid')}</Badge></td></tr>)}
             {!data.recentInvoices.length && <EmptyRows columns={5} text="No invoices issued yet."/>}
           </tbody></table></div>
         </Card>

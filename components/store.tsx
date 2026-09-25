@@ -259,12 +259,21 @@ export function StoreProvider({children}: {children: ReactNode}) {
       setState(emptyLiveState());
       setRole('Staff');
 
-      const bootRes = await fetch('/api/master/bootstrap');
+      // These endpoints are independent after authentication. Fetch them in
+      // parallel so the shell does not wait for bootstrap before starting the
+      // invoice and receipt requests.
+      const [bootRes, invRes, recRes] = await Promise.all([
+        fetch('/api/master/bootstrap', {cache: 'no-store'}),
+        fetch('/api/sales/invoices?limit=50', {cache: 'no-store'}),
+        fetch('/api/sales/receipts?limit=50', {cache: 'no-store'}),
+      ]);
       if (!bootRes.ok) {
         setIsLoading(false);
         return;
       }
       const boot = await bootRes.json();
+      const invData = invRes.ok ? await invRes.json() : {items: []};
+      const recData = recRes.ok ? await recRes.json() : {items: []};
 
       setOpeningStatus(boot.opening || boot.openingStatus || null);
 
@@ -292,6 +301,20 @@ export function StoreProvider({children}: {children: ReactNode}) {
         serviceCatalog: (boot.services || []).map(mapServiceFromApi),
         templates: (boot.templates || []).map(mapTemplateFromApi),
         defaultTemplateId: boot.defaultTemplateId || '',
+        bills: (invData.items || []).map(mapInvoiceFromApi),
+        payments: (recData.items || []).flatMap((r: any) =>
+          (r.components || []).map((c: any) => ({
+            id: c._id || r._id,
+            date: r.date || '',
+            direction: 'In' as const,
+            account: c.account || 'Cash',
+            amount: (c.amountPaise || 0) / 100,
+            purpose: 'Customer payment',
+            reference: r.receiptNumber || r._id,
+            party: r.customerId || '',
+            note: c.method || '',
+          }))
+        ),
         audit: (boot.recentAudit || []).map((a: any) => ({
           id: a._id || a.id,
           action: a.action,
@@ -299,41 +322,6 @@ export function StoreProvider({children}: {children: ReactNode}) {
         })),
       }));
 
-      // Hydrate sales invoices and customer payments
-      try {
-        const [invRes, recRes] = await Promise.all([
-          fetch('/api/sales/invoices?limit=50'),
-          fetch('/api/sales/receipts?limit=50'),
-        ]);
-        if (invRes.ok) {
-          const invData = await invRes.json();
-          setState((prev) => ({
-            ...prev,
-            bills: (invData.items || []).map(mapInvoiceFromApi),
-          }));
-        }
-        if (recRes.ok) {
-          const recData = await recRes.json();
-          setState((prev) => ({
-            ...prev,
-            payments: (recData.items || []).flatMap((r: any) =>
-              (r.components || []).map((c: any) => ({
-                id: c._id || r._id,
-                date: r.date || '',
-                direction: 'In' as const,
-                account: c.account || 'Cash',
-                amount: (c.amountPaise || 0) / 100,
-                purpose: 'Customer payment',
-                reference: r.receiptNumber || r._id,
-                party: r.customerId || '',
-                note: c.method || '',
-              }))
-            ),
-          }));
-        }
-      } catch (e) {
-        console.warn('Could not hydrate invoices/receipts:', e);
-      }
     } catch (err) {
       console.error('Failed to bootstrap master data:', err);
     } finally {

@@ -1,12 +1,13 @@
 // Run via: node --conditions=react-server --test tests/payments-no-stock.test.cjs
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
+const BUSINESS_DATE = new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Kolkata'}).format(new Date());
 
 const dbModule = require('../.billing-test/server/db.js');
 const {createPaidVoucher, getPaidVoucher, listPaidVouchers} = require('../.billing-test/server/payment-voucher-service.js');
 const {recordCustomerReceipt} = require('../.billing-test/server/customer-ledger.js');
 const {RecordCustomerReceiptSchema, IssueInvoiceSchema} = require('../.billing-test/server/sales-schema.js');
-const {issueInvoice} = require('../.billing-test/server/sales-service.js');
+const {issueInvoice, buildSalesFilter} = require('../.billing-test/server/sales-service.js');
 
 // --- In-Memory DB & Fixture Helpers ---
 
@@ -273,14 +274,18 @@ function createFixture(customState = {}) {
             if (stage.$match) {
               docs = docs.filter(item => matchesFilter(item, stage.$match));
             } else if (stage.$group) {
-              const totalField = stage.$group.total?.$sum?.replace('$', '') || 'amountPaise';
+              const [outputField, expression] = Object.entries(stage.$group).find(([key]) => key !== '_id') || ['total', {$sum: '$amountPaise'}];
+              const totalField = expression?.$sum?.replace('$', '') || 'amountPaise';
               const total = docs.reduce((sum, item) => sum + (Number(item[totalField]) || 0), 0);
-              docs = [{ _id: null, total }];
+              docs = [{ _id: null, [outputField]: total }];
             }
           }
           return {
             async toArray() {
               return docs;
+            },
+            async next() {
+              return docs[0] || null;
             },
           };
         },
@@ -301,7 +306,7 @@ const tenantB = {tenantId: 'tenant-b', userId: 'user-b'};
 test('RecordCustomerReceiptSchema allows exactly one invoice allocation', () => {
   const parsed = RecordCustomerReceiptSchema.parse({
     customerId: 'cust-1',
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     components: [{account: 'Cash', method: 'Cash', amountPaise: 15000}],
     allocations: [{targetType: 'Invoice', targetId: 'inv-1', amountPaise: 15000}],
     idempotencyKey: 'rcp-valid-1',
@@ -316,7 +321,7 @@ test('RecordCustomerReceiptSchema rejects multi-invoice allocations', () => {
     () => {
       RecordCustomerReceiptSchema.parse({
         customerId: 'cust-1',
-        date: '2026-09-24',
+        date: BUSINESS_DATE,
         components: [{account: 'Cash', method: 'Cash', amountPaise: 30000}],
         allocations: [
           {targetType: 'Invoice', targetId: 'inv-1', amountPaise: 15000},
@@ -334,7 +339,7 @@ test('RecordCustomerReceiptSchema rejects zero invoice allocations', () => {
     () => {
       RecordCustomerReceiptSchema.parse({
         customerId: 'cust-1',
-        date: '2026-09-24',
+        date: BUSINESS_DATE,
         components: [{account: 'Cash', method: 'Cash', amountPaise: 10000}],
         allocations: [],
         idempotencyKey: 'rcp-empty-inv',
@@ -373,7 +378,7 @@ test('one receipt applies to one invoice and updates paymentStatus and duePaise 
 
   const res = await recordCustomerReceipt(db, tenantA, {
     customerId: 'cust-1',
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     components: [{account: 'Cash', method: 'Cash', amountPaise: 25000}],
     allocations: [{targetType: 'Invoice', targetId: 'inv-1', amountPaise: 25000}],
     idempotencyKey: 'rcp-full-pay',
@@ -418,7 +423,7 @@ test('partial payment reduces invoice due and marks invoice PartlyPaid', async (
 
   const res = await recordCustomerReceipt(db, tenantA, {
     customerId: 'cust-1',
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     components: [{account: 'Bank', method: 'UPI', amountPaise: 4000}],
     allocations: [{targetType: 'Invoice', targetId: 'inv-partial', amountPaise: 4000}],
     idempotencyKey: 'rcp-partial-1',
@@ -454,7 +459,7 @@ test('receipt amount above invoice due is rejected', async () => {
   await assert.rejects(
     recordCustomerReceipt(db, tenantA, {
       customerId: 'cust-1',
-      date: '2026-09-24',
+      date: BUSINESS_DATE,
       components: [{account: 'Cash', method: 'Cash', amountPaise: 5000}],
       allocations: [{targetType: 'Invoice', targetId: 'inv-small', amountPaise: 5000}],
       idempotencyKey: 'rcp-overpay',
@@ -487,7 +492,7 @@ test('receipt amount and allocation mismatch is rejected', async () => {
   await assert.rejects(
     recordCustomerReceipt(db, tenantA, {
       customerId: 'cust-1',
-      date: '2026-09-24',
+      date: BUSINESS_DATE,
       components: [{account: 'Cash', method: 'Cash', amountPaise: 5000}],
       allocations: [{targetType: 'Invoice', targetId: 'inv-mismatch', amountPaise: 4000}],
       idempotencyKey: 'rcp-mismatch',
@@ -521,7 +526,7 @@ test('cross-tenant customer receipt is rejected (tenant isolation)', async () =>
   await assert.rejects(
     recordCustomerReceipt(db, tenantA, {
       customerId: 'cust-tenant-b',
-      date: '2026-09-24',
+      date: BUSINESS_DATE,
       components: [{account: 'Cash', method: 'Cash', amountPaise: 10000}],
       allocations: [{targetType: 'Invoice', targetId: 'inv-tenant-b', amountPaise: 10000}],
       idempotencyKey: 'rcp-cross-tenant',
@@ -555,7 +560,7 @@ test('duplicate receipt idempotency retry returns cached response without double
 
   const payload = {
     customerId: 'cust-1',
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     components: [{account: 'Cash', method: 'Cash', amountPaise: 5000}],
     allocations: [{targetType: 'Invoice', targetId: 'inv-idem', amountPaise: 5000}],
     idempotencyKey: 'rcp-idem-key',
@@ -587,7 +592,7 @@ test('createPaidVoucher generates PV numbering and audit without maintaining acc
   });
 
   const voucher1 = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     payeeName: 'Paper Mills Ltd',
     amountPaise: 120000, // ₹1200
     account: 'Bank',
@@ -605,7 +610,7 @@ test('createPaidVoucher generates PV numbering and audit without maintaining acc
 
   // Verify second voucher sequence
   const voucher2 = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     payeeName: 'Ink Depot',
     amountPaise: 50000,
     account: 'Bank',
@@ -637,7 +642,7 @@ test('payment voucher does not require a maintained cash or bank balance', async
   });
 
   const voucher = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     payeeName: 'Delivery Agent',
     amountPaise: 25000,
     method: 'Cash',
@@ -655,11 +660,11 @@ test('payment voucher does not require a maintained cash or bank balance', async
 test('payment method is recorded without requiring an account selection', async () => {
   const {db} = createFixture({});
   const upi = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24', payeeName: 'Vendor', amountPaise: 1000,
+    date: BUSINESS_DATE, payeeName: 'Vendor', amountPaise: 1000,
     method: 'UPI', purpose: 'Test payment', idempotencyKey: 'pv-method-upi',
   });
   const cash = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24', payeeName: 'Technician', amountPaise: 2000,
+    date: BUSINESS_DATE, payeeName: 'Technician', amountPaise: 2000,
     method: 'Cash', purpose: 'Service charge', idempotencyKey: 'pv-method-cash',
   });
   assert.equal(upi.method, 'UPI');
@@ -680,7 +685,7 @@ test('cross-tenant payment voucher GET and listing isolation', async () => {
         account: 'Cash',
         method: 'Cash',
         purpose: 'Alpha Supplies',
-        date: '2026-09-24',
+        date: BUSINESS_DATE,
         isReversed: false,
         createdAt: new Date(),
       },
@@ -693,7 +698,7 @@ test('cross-tenant payment voucher GET and listing isolation', async () => {
         account: 'Bank',
         method: 'UPI',
         purpose: 'Beta Supplies',
-        date: '2026-09-24',
+        date: BUSINESS_DATE,
         isReversed: false,
         createdAt: new Date(),
       },
@@ -739,8 +744,8 @@ test('product invoice issues without stock records and never modifies stock coll
         tenantId: 'tenant-a',
         version: 1,
         status: 'Draft',
-        invoiceDate: '2026-09-24',
-        dueDate: '2026-09-24',
+        invoiceDate: BUSINESS_DATE,
+        dueDate: BUSINESS_DATE,
         customerId: 'cust-1',
         customerSnapshot: {name: 'Flyer Customer', phone: '9876543210'},
         billTo: {name: 'Flyer Customer', phone: '9876543210', address: '', state: 'Tamil Nadu', stateCode: '33', postalCode: ''},
@@ -800,6 +805,7 @@ test('product invoice issues without stock records and never modifies stock coll
     draftId: 'inv-draft-nostock',
     expectedVersion: 1,
     idempotencyKey: 'issue-nostock-1',
+    paymentComponents: [{account: 'Cash', method: 'Cash', amountPaise: 50000, reference: ''}],
   });
 
   // Invoice is successfully issued
@@ -807,7 +813,17 @@ test('product invoice issues without stock records and never modifies stock coll
   assert.equal(inv.status, 'Issued');
   assert.equal(inv.invoiceNumber.startsWith('INV-'), true);
   assert.equal(inv.totalPaise, 250000);
-  assert.equal(inv.duePaise, 250000);
+  assert.equal(inv.duePaise, 200000);
+  assert.equal(inv.paymentStatus, 'PartlyPaid');
+
+  const issueReceipt = store.customerReceipts[0];
+  assert.ok(issueReceipt.receiptSnapshot);
+  assert.equal(issueReceipt.receiptSnapshot.invoiceId, 'inv-draft-nostock');
+  assert.equal(issueReceipt.receiptSnapshot.invoiceNumber, inv.invoiceNumber);
+  assert.equal(issueReceipt.receiptSnapshot.invoiceTotalPaise, 250000);
+  assert.equal(issueReceipt.receiptSnapshot.dueBeforePaise, 250000);
+  assert.equal(issueReceipt.receiptSnapshot.amountAppliedPaise, 50000);
+  assert.equal(issueReceipt.receiptSnapshot.dueAfterPaise, 200000);
 
   // Invariant verification: Stock collections were NEVER touched
   assert.equal(store.inventoryLots.length, 0);
@@ -818,6 +834,21 @@ test('product invoice issues without stock records and never modifies stock coll
   const product = store.products.find(p => p._id === 'prod-flyer');
   assert.equal(product.status, 'Active');
   assert.equal(product.sellingRatePaise, 500);
+});
+
+test('sales payment-status filters map to issued invoice balances', () => {
+  assert.deepEqual(
+    buildSalesFilter(tenantA, {status: 'Unpaid'}, 'invoices').filter,
+    {tenantId: 'tenant-a', status: 'Issued', duePaise: {$gt: 0}}
+  );
+  assert.deepEqual(
+    buildSalesFilter(tenantA, {status: 'PartlyPaid'}, 'invoices').filter,
+    {tenantId: 'tenant-a', status: 'Issued', paymentStatus: 'PartlyPaid'}
+  );
+  assert.deepEqual(
+    buildSalesFilter(tenantA, {status: 'Paid'}, 'invoices').filter,
+    {tenantId: 'tenant-a', status: 'Issued', duePaise: 0}
+  );
 });
 
 // ==========================================
@@ -846,7 +877,7 @@ test('wrong-customer invoice allocation is rejected', async () => {
   await assert.rejects(
     recordCustomerReceipt(db, tenantA, {
       customerId: 'cust-1',
-      date: '2026-09-24',
+      date: BUSINESS_DATE,
       components: [{account: 'Cash', method: 'Cash', amountPaise: 50000}],
       allocations: [{targetType: 'Invoice', targetId: 'inv-cust-2', amountPaise: 50000}],
       idempotencyKey: 'rcp-wrong-cust',
@@ -859,7 +890,7 @@ test('RecordCustomerReceiptSchema rejects zero or negative amounts', () => {
   assert.throws(() => {
     RecordCustomerReceiptSchema.parse({
       customerId: 'cust-1',
-      date: '2026-09-24',
+      date: BUSINESS_DATE,
       components: [{account: 'Cash', method: 'Cash', amountPaise: 0}],
       allocations: [{targetType: 'Invoice', targetId: 'inv-1', amountPaise: 0}],
       idempotencyKey: 'rcp-zero',
@@ -869,7 +900,7 @@ test('RecordCustomerReceiptSchema rejects zero or negative amounts', () => {
   assert.throws(() => {
     RecordCustomerReceiptSchema.parse({
       customerId: 'cust-1',
-      date: '2026-09-24',
+      date: BUSINESS_DATE,
       components: [{account: 'Cash', method: 'Cash', amountPaise: -500}],
       allocations: [{targetType: 'Invoice', targetId: 'inv-1', amountPaise: -500}],
       idempotencyKey: 'rcp-neg',
@@ -897,7 +928,7 @@ test('receipt snapshot contains correct before/after balances', async () => {
 
   const receipt = await recordCustomerReceipt(db, tenantA, {
     customerId: 'cust-snap',
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     components: [{account: 'Cash', method: 'Cash', amountPaise: 40000}],
     allocations: [{targetType: 'Invoice', targetId: 'inv-snap', amountPaise: 40000}],
     idempotencyKey: 'rcp-snap-test',
@@ -919,7 +950,7 @@ test('voucher numbering generates sequential tenant-scoped PV numbers', async ()
   const {db} = createFixture({});
 
   const v1 = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     payeeName: 'Paper Vendor Ltd',
     amountPaise: 15000,
     account: 'Bank',
@@ -929,7 +960,7 @@ test('voucher numbering generates sequential tenant-scoped PV numbers', async ()
   });
 
   const v2 = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     payeeName: 'Ink Supplier Corp',
     amountPaise: 25000,
     account: 'Cash',
@@ -948,7 +979,7 @@ test('voucher idempotency returns one voucher without account movements', async 
   const initialMovements = store.accountMovements.length;
 
   const v1 = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     payeeName: 'Vendor Unique',
     amountPaise: 10000,
     account: 'Bank',
@@ -961,7 +992,7 @@ test('voucher idempotency returns one voucher without account movements', async 
 
   // Retry with same idempotency key
   const v2 = await createPaidVoucher(db, tenantA, {
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     payeeName: 'Vendor Unique',
     amountPaise: 10000,
     account: 'Bank',
@@ -996,7 +1027,7 @@ test('two concurrent receipts cannot overpay the invoice', async () => {
   // First receipt takes 80000 of 100000 due
   await recordCustomerReceipt(db, tenantA, {
     customerId: 'cust-concur',
-    date: '2026-09-24',
+    date: BUSINESS_DATE,
     components: [{account: 'Cash', method: 'Cash', amountPaise: 80000}],
     allocations: [{targetType: 'Invoice', targetId: 'inv-concur', amountPaise: 80000}],
     idempotencyKey: 'rcp-concur-1',
@@ -1006,7 +1037,7 @@ test('two concurrent receipts cannot overpay the invoice', async () => {
   await assert.rejects(
     recordCustomerReceipt(db, tenantA, {
       customerId: 'cust-concur',
-      date: '2026-09-24',
+      date: BUSINESS_DATE,
       components: [{account: 'Cash', method: 'Cash', amountPaise: 50000}],
       allocations: [{targetType: 'Invoice', targetId: 'inv-concur', amountPaise: 50000}],
       idempotencyKey: 'rcp-concur-2',

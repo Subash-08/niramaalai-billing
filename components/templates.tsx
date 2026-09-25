@@ -77,7 +77,7 @@ export function TemplateInvoice({
         </div>
         <div className="invoice-box">
           <div className="invoice-parties">
-            <div>
+            <div className="invoice-party-column">
               <div
                 className="invoice-shop"
                 style={{
@@ -95,6 +95,23 @@ export function TemplateInvoice({
               )}
               {f.shopPhone && <p>Contact: {s.phone}</p>}
               {f.shopEmail && <p>Email: {s.email}</p>}
+              <div className="invoice-buyer">
+                <small>{supplier ? 'Supplier' : 'Buyer (Bill to)'}</small>
+                {f.customerName && <strong>{billTo?.name || 'Customer not selected'}</strong>}
+                {f.customerAddress && <p>{billTo?.address}</p>}
+                {f.customerPhone && <p>{billTo?.phone}</p>}
+                {f.customerGst && <p>GSTIN/UIN: {c?.gst || 'Not provided'}</p>}
+                {billTo && (billTo as any).state && <p>{(billTo as any).state}{(billTo as any).stateCode ? `, Code: ${(billTo as any).stateCode}` : ''}{(billTo as any).postalCode ? ` · PIN: ${(billTo as any).postalCode}` : ''}</p>}
+                {f.shipping && (
+                  <div className="invoice-shipto">
+                    <strong>Ship to (Deliver to)</strong>
+                    <p>{bill.shipTo?.name || billTo?.name}</p>
+                    <p>{bill.shipTo?.address || billTo?.address}</p>
+                    <p>{bill.shipTo?.phone || billTo?.phone}</p>
+                    {deliveryTo && <p>{(deliveryTo as any).state || ''} {(deliveryTo as any).postalCode || ''}</p>}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="invoice-meta">
               {Object.entries({
@@ -115,27 +132,6 @@ export function TemplateInvoice({
                   </div>
                 ))}
             </div>
-          </div>
-          <div className="invoice-buyer">
-            <small>{supplier ? 'Supplier' : 'Buyer (Bill to)'}</small>
-            {f.customerName && <strong>{billTo?.name || 'Customer not selected'}</strong>}
-            {f.customerAddress && <p>{billTo?.address}</p>}
-            {f.customerPhone && <p>{billTo?.phone}</p>}
-            {f.customerGst && <p>GSTIN/UIN: {c?.gst || 'Not provided'}</p>}
-            {billTo && (billTo as any).state && <p>{(billTo as any).state}{(billTo as any).stateCode ? `, Code: ${(billTo as any).stateCode}` : ''}{(billTo as any).postalCode ? ` · PIN: ${(billTo as any).postalCode}` : ''}</p>}
-            {f.shipping && (
-              <div className="invoice-shipto">
-                <strong>Ship to (Deliver to)</strong>
-                <p>{bill.shipTo?.name || billTo?.name}</p>
-                <p>{bill.shipTo?.address || billTo?.address}</p>
-                <p>{bill.shipTo?.phone || billTo?.phone}</p>
-                {deliveryTo && (
-                  <p>
-                    {(deliveryTo as any).state || ''} {(deliveryTo as any).postalCode || ''}
-                  </p>
-                )}
-              </div>
-            )}
           </div>
           <table className="invoice-items">
             <thead>
@@ -175,7 +171,7 @@ export function TemplateInvoice({
                   amount: money(calc.base),
                 };
                 return (
-                  <tr key={i}>
+                  <tr key={i} className="invoice-line-row">
                     {(cols as any[]).map((col: any) => (
                       <td key={col.id} style={{textAlign: col.align}}>
                         {cells[col.id]}
@@ -184,6 +180,11 @@ export function TemplateInvoice({
                   </tr>
                 );
               })}
+              {Array.from({length: Math.max(0, 10 - bill.lines.length)}, (_, index) => (
+                <tr className="invoice-items-spacer" aria-hidden="true" key={`empty-${index}`}>
+                  {(cols as any[]).map((col: any) => <td key={col.id}>&nbsp;</td>)}
+                </tr>
+              ))}
               {f.subtotal && (
                 <tr className="invoice-tax-row">
                   <td colSpan={Math.max(1, cols.length - 1)}>Taxable value</td>
@@ -340,18 +341,21 @@ export function PrintDialog({bills, onClose}: {bills: Bill[]; onClose: () => voi
         const element = wrapper?.querySelector<HTMLElement>('.invoice-paper');
         if (!element) throw new Error(`Preview for ${bill.id} is not ready. Wait for it to appear and try again.`);
         const billTemplate = userOverrode ? template : ((bill as any).templateSnapshot || state.templates.find((t) => t.id === (bill.templateId || state.defaultTemplateId)) || template);
-        return {name: bill.id, element, template: billTemplate};
+        return {name: (bill as any).invoiceNumber || (bill as any).quotationNumber || bill.id, element, template: billTemplate};
       });
       const firstTemplate = entries[0]?.template || template;
       e.downloadBytes(
-        bills.length === 1 ? bills[0].id + '.pdf' : 'invoices.zip',
+        bills.length === 1 ? ((bills[0] as any).invoiceNumber || (bills[0] as any).quotationNumber || bills[0].id) + '.pdf' : 'invoices.zip',
         bills.length === 1
           ? await e.invoicePreviewPdfBytes(entries[0].element, firstTemplate)
           : await e.invoicePreviewZipBytes(entries),
         bills.length === 1 ? 'application/pdf' : 'application/zip'
       );
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Download failed.');
+      const message = error instanceof Error ? error.message : 'Download failed.';
+      notify(/Loading chunk|ChunkLoadError/i.test(message)
+        ? 'PDF tools were updated while this page was open. Refresh the page once, then download again.'
+        : message);
     } finally {
       setBusy(false);
     }

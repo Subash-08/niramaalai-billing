@@ -697,11 +697,11 @@ export async function issueInvoice(db: Db, identity: Identity, rawInput: IssueIn
       }
       // No product stock posting. Quantity is used only for invoice calculation.
     }
-    const settlement = await settleInvoiceOnIssue(db, identity, session, {...draft, totalPaise: totals.totalPaise}, input);
     const year = deriveFinancialYear(draft.invoiceDate);
     const invoiceNumber = await nextTenantSequence(db, tenantId,
       draft.invoiceKind === 'Service' ? 'ServiceInvoice' : 'Invoice', year,
       draft.invoiceKind === 'Service' ? 'SRV' : 'INV', session);
+    const settlement = await settleInvoiceOnIssue(db, identity, session, {...draft, totalPaise: totals.totalPaise, invoiceNumber}, input);
     const sellerSnapshot = Object.fromEntries(['name','phone','email','address','gst','state','stateCode','postalCode','bank','account','ifsc','declaration','logoFileId'].map(key => [key, seller[key] ?? '']));
     const issuedSnapshot = {schemaVersion: 1, invoiceNumber, invoiceDate: draft.invoiceDate, dueDate: draft.dueDate,
       seller: sellerSnapshot, customer: draft.customerSnapshot, billTo: draft.billTo, shipTo: draft.shipTo,
@@ -819,15 +819,23 @@ export async function issueInvoice(db: Db, identity: Identity, rawInput: IssueIn
 // 6. List Invoices / Quotations
 export function buildSalesFilter(identity: Identity, raw: unknown, kind: 'invoices' | 'quotations') {
   const params = SalesListQuerySchema.parse(raw);
-  const allowed = kind === 'invoices' ? ['Draft', 'Issued', 'Cancelled'] : ['Draft', 'Sent', 'Accepted', 'Rejected', 'Converted', 'Expired'];
+  const allowed = kind === 'invoices' ? ['Draft', 'Issued', 'Cancelled', 'Paid', 'PartlyPaid', 'Unpaid'] : ['Draft', 'Sent', 'Accepted', 'Rejected', 'Converted', 'Expired'];
   if (params.status && !allowed.includes(params.status)) throw new AppError(400, 'Invalid document status for this list.');
   const filter: Record<string, any> = {tenantId: identity.tenantId};
-  if (params.status) filter.status = params.status;
+  if (kind === 'invoices' && params.status === 'Paid') {
+    filter.status = 'Issued'; filter.duePaise = 0;
+  } else if (kind === 'invoices' && params.status === 'PartlyPaid') {
+    filter.status = 'Issued'; filter.paymentStatus = 'PartlyPaid';
+  } else if (kind === 'invoices' && params.status === 'Unpaid') {
+    // The sales UI calls this view Outstanding: it includes both unpaid and
+    // partially paid invoices whenever a positive balance remains.
+    filter.status = 'Issued'; filter.duePaise = {$gt: 0};
+  } else if (params.status) filter.status = params.status;
   if (params.customerId) filter.customerId = params.customerId;
   if (params.dateFrom || params.dateTo) filter[kind === 'invoices' ? 'invoiceDate' : 'quotationDate'] = {
     ...(params.dateFrom && {$gte: params.dateFrom}), ...(params.dateTo && {$lte: params.dateTo})};
   if (params.hasDue === 'true') {
-    if (kind !== 'invoices' || (params.status && params.status !== 'Issued')) throw new AppError(400, 'Only issued invoices have outstanding dues.');
+    if (kind !== 'invoices' || (params.status && !['Issued', 'Unpaid', 'PartlyPaid'].includes(params.status))) throw new AppError(400, 'Only issued invoices have outstanding dues.');
     filter.status = 'Issued'; filter.duePaise = {$gt: 0};
   }
   if (params.search) {

@@ -133,7 +133,7 @@ export const CancelInvoiceDraftSchema = z.object({expectedVersion: z.number().in
 export const SalesListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(100000).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  status: z.enum(['Draft', 'Issued', 'Cancelled', 'Sent', 'Accepted', 'Rejected', 'Converted', 'Expired']).optional(),
+  status: z.enum(['Draft', 'Issued', 'Cancelled', 'Paid', 'PartlyPaid', 'Unpaid', 'Sent', 'Accepted', 'Rejected', 'Converted', 'Expired']).optional(),
   customerId: Id.optional(), search: z.string().trim().max(100).optional(),
   dateFrom: CalendarDate.optional(), dateTo: CalendarDate.optional(),
   hasDue: z.enum(['true', 'false']).optional(),

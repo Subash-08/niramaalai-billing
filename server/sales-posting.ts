@@ -56,7 +56,8 @@ export async function insertCustomerAllocation(db: Db, identity: Identity, sessi
 /** Issue owns the transaction and final invoice write. This function cannot be
  * called without its session; an exception must roll back the entire issue. */
 export async function settleInvoiceOnIssue(db: Db, identity: Identity, session: ClientSession,
-  invoice: {_id: string; customerId: string; totalPaise: number; invoiceDate: string}, input: IssueInvoiceInput) {
+  invoice: {_id: string; customerId: string; totalPaise: number; invoiceDate: string; invoiceNumber?: string;
+    customerSnapshot?: any; billTo?: any; issuedSnapshot?: any}, input: IssueInvoiceInput) {
   const tenantId = identity.tenantId;
   const now = new Date();
   const date = invoice.invoiceDate;
@@ -122,6 +123,52 @@ export async function settleInvoiceOnIssue(db: Db, identity: Identity, session: 
       componentId: uid('CMP'),
     }));
 
+    const [settingsDoc, tenantDoc, outstanding] = await Promise.all([
+      col(db, 'companySettings').findOne({tenantId}, {session}),
+      col(db, 'tenants').findOne({_id: tenantId}, {session}),
+      col(db, 'invoices').aggregate([
+        {$match: {tenantId, customerId: invoice.customerId, status: 'Issued'}},
+        {$group: {_id: null, amountPaise: {$sum: '$duePaise'}}},
+      ], {session}).next(),
+    ]);
+    const customerSnapshot = {
+      ...(invoice.customerSnapshot || {}),
+      name: invoice.billTo?.name || invoice.customerSnapshot?.name || 'Customer',
+      phone: invoice.billTo?.phone || invoice.customerSnapshot?.phone || '',
+      address: invoice.billTo?.address || invoice.customerSnapshot?.address || '',
+    };
+    const sellerSnapshot = {
+      name: settingsDoc?.name || tenantDoc?.companyName || 'Billing Software',
+      phone: settingsDoc?.phone || '',
+      email: settingsDoc?.email || '',
+      address: settingsDoc?.address || '',
+      gst: settingsDoc?.gst || '',
+      logoFileId: settingsDoc?.logoFileId || null,
+    };
+    const amountAppliedPaise = receiptApplied;
+    const dueBeforePaise = Math.max(0, invoice.totalPaise - advanceUsed);
+    const primaryComponent = input.paymentComponents[0];
+    const receiptSnapshot = {
+      invoiceId: invoice._id,
+      invoiceNumber: invoice.invoiceNumber || invoice._id,
+      invoiceTotalPaise: invoice.totalPaise,
+      dueBeforePaise,
+      amountAppliedPaise,
+      dueAfterPaise: duePaise,
+      customerOutstandingAfterPaise: (outstanding?.amountPaise || 0) + duePaise,
+      customer: customerSnapshot,
+      seller: sellerSnapshot,
+      company: sellerSnapshot,
+      payment: {
+        account: primaryComponent?.account || 'Cash',
+        method: primaryComponent?.method || 'Cash',
+        amountPaise: paymentTotal,
+        reference: primaryComponent?.reference || '',
+      },
+      receiptDate: date,
+      receiptNumber,
+    };
+
     let advanceId: string | undefined;
     if (excessPaise > 0) {
       advanceId = uid('ADV');
@@ -177,6 +224,7 @@ export async function settleInvoiceOnIssue(db: Db, identity: Identity, session: 
       advanceAmountPaise: excessPaise,
       advanceId,
       allocations: allocs,
+      receiptSnapshot,
       invoiceId: invoice._id,
       issuedWithInvoice: true,
       status: 'Posted',

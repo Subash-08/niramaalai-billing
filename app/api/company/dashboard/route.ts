@@ -117,6 +117,15 @@ export async function GET() {
       if (pj._id) printJobsByStatus[pj._id] = pj.count || 0;
     }
 
+    const legacyReceiptInvoiceIds = recentReceipts
+      .filter((receipt: any) => !receipt.receiptSnapshot)
+      .map((receipt: any) => receipt.invoiceId || receipt.allocations?.[0]?.targetId)
+      .filter(Boolean);
+    const legacyReceiptInvoices = legacyReceiptInvoiceIds.length
+      ? await col(db, 'invoices').find({tenantId, _id: {$in: legacyReceiptInvoiceIds}}).toArray()
+      : [];
+    const invoiceNumberById = new Map(legacyReceiptInvoices.map((invoice: any) => [invoice._id, invoice.invoiceNumber || invoice._id]));
+
     return {
       todayDate: today,
       sales: {
@@ -145,7 +154,7 @@ export async function GET() {
         dueDate: inv.dueDate || null,
         totalPaise: inv.totalPaise || (inv.grandTotalPaise ?? 0),
         duePaise: inv.duePaise || 0,
-        paymentStatus: inv.paymentStatus || (inv.duePaise === 0 ? 'Paid' : 'Unpaid'),
+        paymentStatus: inv.paymentStatus || (inv.duePaise === 0 ? 'Paid' : inv.duePaise < inv.totalPaise ? 'PartlyPaid' : 'Unpaid'),
       })),
       outstandingInvoices: outstandingInvoices.map((inv: any) => ({
         id: inv._id || inv.id,
@@ -160,7 +169,7 @@ export async function GET() {
         id: rcpt._id || rcpt.id,
         receiptNumber: rcpt.receiptNumber || rcpt.id,
         customerName: rcpt.customerSnapshot?.name || 'Customer',
-        invoiceNumber: rcpt.receiptSnapshot?.invoiceNumber || rcpt.allocations?.[0]?.targetId || 'Invoice',
+        invoiceNumber: rcpt.receiptSnapshot?.invoiceNumber || invoiceNumberById.get(rcpt.invoiceId || rcpt.allocations?.[0]?.targetId) || rcpt.allocations?.[0]?.targetId || 'Invoice',
         amountPaise: rcpt.totalAmountPaise || rcpt.amountPaise || 0,
         method: rcpt.components?.[0]?.method || 'Cash',
         date: rcpt.date,

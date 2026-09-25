@@ -185,6 +185,7 @@ export async function GET(
 
     const totalCount = timelineItems.length;
     const paginatedTimeline = timelineItems.slice(skip, skip + limit);
+    const invoiceNumberById = new Map(invoices.map(inv => [inv._id, inv.invoiceNumber || inv._id]));
 
     return {
       customer: {
@@ -221,7 +222,7 @@ export async function GET(
           invoiceKind: inv.invoiceKind || 'Sale',
           businessCategory: inv.businessCategory || 'NewGoods',
           status: inv.status,
-          paymentStatus: inv.paymentStatus || ((inv.duePaise || 0) > 0 ? 'Unpaid' : 'Paid'),
+          paymentStatus: inv.paymentStatus || ((inv.duePaise || 0) === 0 ? 'Paid' : (inv.duePaise || 0) < (inv.totalPaise || 0) ? 'PartlyPaid' : 'Unpaid'),
           totalPaise: inv.totalPaise || 0,
           returnCreditPaise,
           netInvoicePaise: Math.max(0, (inv.totalPaise || 0) - returnCreditPaise),
@@ -235,7 +236,7 @@ export async function GET(
         totalAmountPaise: r.totalAmountPaise,
         account: r.components?.[0]?.account || 'Cash',
         method: r.components?.[0]?.method || 'Cash',
-        invoiceNumber: r.receiptSnapshot?.invoiceNumber || '',
+        invoiceNumber: r.receiptSnapshot?.invoiceNumber || invoiceNumberById.get(r.invoiceId || r.allocations?.[0]?.targetId) || '',
         reference: r.allocations?.[0]?.targetId || '',
       })),
       receiptCount: receipts.length,

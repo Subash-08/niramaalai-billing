@@ -65,6 +65,8 @@ export type CustomerReceiptDocument = {
     amountPaise: number;
   }>;
   notes?: string;
+  invoiceId?: string;
+  issuedWithInvoice?: boolean;
   receiptSnapshot?: {
     invoiceId: string;
     invoiceNumber: string;
@@ -104,6 +106,47 @@ export type CustomerReceiptDocument = {
   createdAt: Date;
   createdBy: string;
 };
+
+function legacyReceiptDisplaySnapshot(receipt: CustomerReceiptDocument, invoice: any) {
+  if (receipt.receiptSnapshot || !invoice) return undefined;
+  const allocation = receipt.allocations?.find(item => item.targetType === 'Invoice');
+  const amountAppliedPaise = allocation?.amountPaise || receipt.allocatedAmountPaise || receipt.totalAmountPaise || 0;
+  const invoiceTotalPaise = invoice.totalPaise || invoice.issuedSnapshot?.totalPaise || 0;
+  const dueBeforePaise = receipt.issuedWithInvoice
+    ? Math.max(0, invoiceTotalPaise - (invoice.allocatedAdvancePaise || 0))
+    : Math.min(invoiceTotalPaise, Math.max(amountAppliedPaise, (invoice.duePaise || 0) + amountAppliedPaise));
+  const dueAfterPaise = Math.max(0, dueBeforePaise - amountAppliedPaise);
+  const issuedCustomer = invoice.issuedSnapshot?.customer || invoice.customerSnapshot || {};
+  const billTo = invoice.issuedSnapshot?.billTo || invoice.billTo || {};
+  const seller = invoice.issuedSnapshot?.seller || {};
+  const component = receipt.components?.[0] || {};
+  return {
+    invoiceId: invoice._id,
+    invoiceNumber: invoice.invoiceNumber || invoice.issuedSnapshot?.invoiceNumber || invoice._id,
+    invoiceTotalPaise,
+    dueBeforePaise,
+    amountAppliedPaise,
+    dueAfterPaise,
+    customerOutstandingAfterPaise: dueAfterPaise,
+    customer: {
+      ...issuedCustomer,
+      ...receipt.customerSnapshot,
+      name: billTo.name || receipt.customerSnapshot?.name || issuedCustomer.name || 'Customer',
+      phone: billTo.phone || receipt.customerSnapshot?.phone || issuedCustomer.phone || '',
+      address: billTo.address || receipt.customerSnapshot?.address || issuedCustomer.address || '',
+    },
+    seller,
+    company: seller,
+    payment: {
+      account: component.account || 'Cash',
+      method: component.method || 'Cash',
+      amountPaise: receipt.totalAmountPaise,
+      reference: component.reference || '',
+    },
+    receiptDate: receipt.date,
+    receiptNumber: receipt.receiptNumber,
+  };
+}
 
 export type CustomerAdvanceDocument = {
   _id: string;
@@ -1393,9 +1436,23 @@ export async function listCustomerReceipts(
     ]).toArray(),
   ]);
 
+  const invoiceIds = [...new Set(items
+    .filter(item => !item.receiptSnapshot)
+    .map(item => item.invoiceId || item.allocations?.find((a: any) => a.targetType === 'Invoice')?.targetId)
+    .filter((id): id is string => !!id))];
+  const invoiceRows = invoiceIds.length
+    ? await col(db, 'invoices').find({tenantId, _id: {$in: invoiceIds}}).toArray()
+    : [];
+  const invoicesById = new Map(invoiceRows.map(invoice => [invoice._id, invoice]));
+  const enrichedItems = items.map(item => {
+    const invoiceId = item.invoiceId || item.allocations?.find((a: any) => a.targetType === 'Invoice')?.targetId;
+    const displaySnapshot = legacyReceiptDisplaySnapshot(item, invoiceId ? invoicesById.get(invoiceId) : undefined);
+    return displaySnapshot ? {...item, displaySnapshot} : item;
+  });
+
   const totalReceivedPaise = sumAgg[0]?.totalReceivedPaise || 0;
 
-  return {items, total, totalReceivedPaise, page, limit, totalPages: Math.max(1, Math.ceil(total / limit))};
+  return {items: enrichedItems, total, totalReceivedPaise, page, limit, totalPages: Math.max(1, Math.ceil(total / limit))};
 }
 
 // 9. Get Customer Receipt
@@ -1409,5 +1466,10 @@ export async function getCustomerReceipt(
     tenantId: identity.tenantId,
   });
   if (!receipt) throw new AppError(404, 'Receipt not found.');
-  return {receipt};
+  const invoiceId = receipt.invoiceId || receipt.allocations?.find((a: any) => a.targetType === 'Invoice')?.targetId;
+  const invoice = invoiceId
+    ? await col(db, 'invoices').findOne({_id: invoiceId, tenantId: identity.tenantId})
+    : null;
+  const displaySnapshot = legacyReceiptDisplaySnapshot(receipt, invoice);
+  return {receipt: displaySnapshot ? {...receipt, displaySnapshot} : receipt};
 }

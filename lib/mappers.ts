@@ -353,6 +353,10 @@ export function mapAllocationFromApi(doc: any) {
 }
 
 export function mapInvoiceFromApi(doc: any) {
+  const totalPaise = doc.totalPaise || 0;
+  const duePaise = doc.duePaise || 0;
+  const paidPaise = Math.max(0, totalPaise - duePaise);
+  const paymentStatus = doc.paymentStatus || (duePaise === 0 ? 'Paid' : paidPaise > 0 ? 'PartlyPaid' : 'Unpaid');
   return {
     id: doc._id || doc.id,
     invoiceNumber: doc.invoiceNumber || '',
@@ -363,6 +367,7 @@ export function mapInvoiceFromApi(doc: any) {
     kind: (doc.invoiceKind || 'Sale') as any,
     category: (doc.businessCategory === 'NewGoods' ? 'New goods' : doc.businessCategory === 'UsedGoods' ? 'Used goods' : 'Service') as any,
     status: doc.status || 'Draft',
+    paymentStatus,
     lines: (doc.lines || []).map((l: any) => ({
       invoiceLineId: l.lineId || l._id || l.id,
       productId: l.productId || '',
@@ -401,9 +406,10 @@ export function mapInvoiceFromApi(doc: any) {
     sourceId: doc.sourceQuotationId,
     printJobId: doc.printJobId || undefined,
     jobId: doc.printJobId || doc.jobId || undefined,
-    total: (doc.totalPaise || 0) / 100,
-    paid: ((doc.totalPaise || 0) - (doc.duePaise || 0)) / 100,
-    dueAmount: (doc.duePaise || 0) / 100,
+    total: totalPaise / 100,
+    paid: paidPaise / 100,
+    paidAmount: paidPaise / 100,
+    dueAmount: duePaise / 100,
     version: doc.version,
     roundOff: (doc.roundOffPaise || 0) / 100,
   };

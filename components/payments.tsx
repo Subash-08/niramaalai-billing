@@ -1308,7 +1308,7 @@ export function ReceiptPreviewModal({
   const { state, notify } = useStore();
   const settings = state.settings;
 
-  const snap = receipt.receiptSnapshot;
+  const snap = receipt.receiptSnapshot || receipt.displaySnapshot;
   const seller = snap?.seller || settings;
   const cust = snap?.customer || state.customers.find((c: any) => c.id === receipt.customerId) || receipt.customerSnapshot || {};
 
@@ -1334,6 +1334,7 @@ export function ReceiptPreviewModal({
 
   const dueAfterPaise = snap?.dueAfterPaise ?? Math.max(0, dueBeforePaise - amountPaidPaise);
   const dueAfterRupees = dueAfterPaise / 100;
+  const paymentStatus = dueAfterPaise === 0 ? 'Paid' : amountPaidPaise > 0 ? 'Partly paid' : 'Unpaid';
 
   const custOutstandingPaise = snap?.customerOutstandingAfterPaise
     ?? (typeof cust?.balancePaise === 'number' ? cust.balancePaise : (typeof cust?.balance === 'number' ? Math.round(cust.balance * 100) : dueAfterPaise));
@@ -1470,9 +1471,14 @@ export function ReceiptPreviewModal({
           </div>
 
           <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '4px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <strong style={{fontSize: '0.84rem'}}>Outstanding after this receipt</strong>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
               <span style={{ color: '#64748b' }}>Amount Paid Now:</span>
               <strong style={{ color: '#16a34a', fontSize: '0.95rem' }}>{money(amountPaidRupees)}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+              <span style={{ color: '#64748b' }}>Payment Status:</span>
+              <strong>{paymentStatus}</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
               <span style={{ color: '#64748b' }}>Invoice Remaining Due:</span>

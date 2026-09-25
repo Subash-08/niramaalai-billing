@@ -103,7 +103,10 @@ export async function receiptPdfBytes(settings: any, receipt: any, invoice?: any
   doc.text('PAYMENT RECEIPT', width / 2, y, {align: 'center'});
   y += 7;
 
-  const snap = receipt.receiptSnapshot;
+  // New receipts carry an immutable snapshot. Older invoice-time receipts are
+  // enriched by the API with a tenant-scoped displaySnapshot reconstructed
+  // from the linked invoice, so historical PDFs show the original bill total.
+  const snap = receipt.receiptSnapshot || receipt.displaySnapshot;
   const seller = snap?.seller || settings;
   const cust = snap?.customer || customer || receipt.customerSnapshot;
 
@@ -180,6 +183,7 @@ export async function receiptPdfBytes(settings: any, receipt: any, invoice?: any
   const dueAfterPaise = snap?.dueAfterPaise
     ?? Math.max(0, dueBeforePaise - amountPaidPaise);
   const dueAfter = dueAfterPaise / 100;
+  const paymentStatus = dueAfterPaise === 0 ? 'Paid' : amountPaidPaise > 0 ? 'Partly paid' : 'Unpaid';
 
   const custOutstandingPaise = snap?.customerOutstandingAfterPaise
     ?? (typeof customer?.balancePaise === 'number' ? customer.balancePaise : (typeof customer?.balance === 'number' ? Math.round(customer.balance * 100) : dueAfterPaise));
@@ -211,6 +215,7 @@ export async function receiptPdfBytes(settings: any, receipt: any, invoice?: any
   const summaryBox: (string | number)[][] = [
     ['Total Amount Received', cash(amountPaid)],
     ['Amount in Words', words],
+    ['Invoice Payment Status', paymentStatus],
     ['Remaining Due on this Invoice', cash(dueAfter)],
     ['Total Customer Outstanding Balance', cash(custOutstanding)],
   ];

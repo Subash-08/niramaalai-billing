@@ -171,9 +171,19 @@ export async function GET(request: Request) {
 
         const receipts = await col(db, 'customerReceipts').find(query).sort({date: -1, createdAt: -1}).toArray();
 
+        const legacyInvoiceIds = receipts
+          .filter((receipt: any) => !receipt.receiptSnapshot)
+          .map((receipt: any) => receipt.invoiceId || receipt.allocations?.[0]?.targetId)
+          .filter(Boolean);
+        const legacyInvoices = legacyInvoiceIds.length
+          ? await col(db, 'invoices').find({tenantId, _id: {$in: legacyInvoiceIds}}).toArray()
+          : [];
+        const invoiceNumberById = new Map(legacyInvoices.map((invoice: any) => [invoice._id, invoice.invoiceNumber || invoice._id]));
+
         const rows = receipts.map((r: any) => {
           const comp = r.components?.[0] || {};
-          const settledInvoice = r.receiptSnapshot?.invoiceNumber || r.allocations?.[0]?.targetId || r.invoiceId || 'Invoice';
+          const targetId = r.invoiceId || r.allocations?.[0]?.targetId;
+          const settledInvoice = r.receiptSnapshot?.invoiceNumber || invoiceNumberById.get(targetId) || targetId || 'Invoice';
           return [
             r.receiptNumber || r._id,
             r.date,
