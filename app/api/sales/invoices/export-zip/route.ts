@@ -9,7 +9,7 @@ import type {InvoiceDocument} from '@/server/sales-service';
 
 export const runtime = 'nodejs';
 
-const MAX_ZIP_LIMIT = 500;
+const MAX_ZIP_LIMIT = 100;
 
 function hexToRgb(hex: string): [number, number, number] {
   const clean = (hex || '').replace('#', '');
@@ -33,15 +33,31 @@ export async function GET(request: Request) {
     const db = await database();
     const url = new URL(request.url);
 
+    const hasDue = url.searchParams.get('hasDue') === 'true';
     const customerId = url.searchParams.get('customerId') || undefined;
     const status = url.searchParams.get('status') || undefined;
     const dateFrom = url.searchParams.get('dateFrom') || undefined;
     const dateTo = url.searchParams.get('dateTo') || undefined;
     const search = (url.searchParams.get('search') || '').trim().slice(0, 200);
+    const businessCategory = url.searchParams.get('businessCategory') || undefined;
 
     const filter: Record<string, any> = {tenantId: identity.tenantId};
+    if (hasDue || status === 'Unpaid') {
+      filter.status = 'Issued';
+      filter.duePaise = {$gt: 0};
+    } else if (status === 'Paid') {
+      filter.status = 'Issued';
+      filter.duePaise = 0;
+    } else if (status === 'PartlyPaid') {
+      filter.status = 'Issued';
+      filter.paymentStatus = 'PartlyPaid';
+    } else if (status && status !== 'All') {
+      filter.status = status;
+    }
     if (customerId) filter.customerId = customerId;
-    if (status && status !== 'All') filter.status = status;
+    if (businessCategory && ['NewGoods', 'UsedGoods', 'Service'].includes(businessCategory)) {
+      filter.businessCategory = businessCategory;
+    }
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [
@@ -188,8 +204,8 @@ export async function GET(request: Request) {
       const snap = inv.issuedSnapshot || inv;
       const num = snap.invoiceNumber || inv.invoiceNumber || inv._id;
       const safeNum = String(num).replace(/[^a-zA-Z0-9_-]/g, '_');
-      const safeId = inv._id.slice(-6);
-      const fileName = `${safeNum}_${safeId}.pdf`;
+      const isDraft = inv.status === 'Draft';
+      const fileName = isDraft ? `DRAFT_${safeNum}.pdf` : `${safeNum}.pdf`;
 
       // Resolve template
       let tmpl = snap.template || defaultTemplate;
@@ -400,7 +416,7 @@ export async function GET(request: Request) {
       if (fields.grandTotal !== false) {
         summaryRows.push(['Total (INR)', fmtPaise(snap.totalPaise || inv.totalPaise)]);
       }
-      if (fields.payments !== false) {
+      if (fields.payments !== false && !isDraft) {
         const grand = snap.totalPaise || inv.totalPaise || 0;
         const due = inv.duePaise ?? 0;
         const paid = Math.max(0, grand - due);
@@ -440,9 +456,25 @@ export async function GET(request: Request) {
         y = (doc as any).lastAutoTable.finalY + 4;
       }
 
-      // Footer
-      const footerText = tmpl.footer || 'This is a computer generated invoice.';
+      // Watermark & Footer
       const pageCount = doc.getNumberOfPages();
+      if (isDraft || inv.status === 'Cancelled') {
+        const watermarkText = isDraft ? 'DRAFT · NOT ISSUED' : 'CANCELLED';
+        for (let p = 1; p <= pageCount; p++) {
+          doc.setPage(p);
+          doc.saveGraphicsState();
+          doc.setTextColor(220, 80, 80);
+          doc.setFontSize(36);
+          doc.setFont('helvetica', 'bold');
+          doc.text(watermarkText, width / 2, doc.internal.pageSize.getHeight() / 2, {
+            align: 'center',
+            angle: 45,
+          });
+          doc.restoreGraphicsState();
+        }
+      }
+
+      const footerText = tmpl.footer || 'This is a computer generated invoice.';
       for (let p = 1; p <= pageCount; p++) {
         doc.setPage(p);
         doc.setFontSize(8);

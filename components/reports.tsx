@@ -2,7 +2,7 @@
 import ExportButtons from './export-buttons';
 import {useState, useEffect, useCallback} from 'react';
 import Link from 'next/link';
-import {Download, Printer, ArrowUpRight, BarChart3, LockKeyhole} from 'lucide-react';
+import {Download, Printer, ArrowUpRight, BarChart3, LockKeyhole, Search} from 'lucide-react';
 import {TODAY, money, roundedTotal, balance, paid, totals, lineTotal} from '@/lib/domain';
 import {useStore} from './store';
 import {PageHead, Card, Btn, Modal, Field, Empty, csvDownload} from './ui';
@@ -20,7 +20,7 @@ const reportNames = [
 ];
 
 export default function Reports() {
-  const {state, role, notify, isLive} = useStore();
+  const {state, role, notify, isLive, fetchInvoicesPage} = useStore();
   const [customer, setCustomer] = useState('All customers');
   const [paymentStatus, setPaymentStatus] = useState('All payments');
   const [template, setTemplate] = useState(state.defaultTemplateId);
@@ -34,6 +34,8 @@ export default function Reports() {
   const [serverReport, setServerReport] = useState<{headers: string[]; rows: (string | number)[][]} | null>(null);
   const [loading, setLoading] = useState(false);
   const [reportError, setReportError] = useState('');
+  const [filterText, setFilterText] = useState('');
+  const [batchBills, setBatchBills] = useState<any[]>([]);
 
   useEffect(() => {
     if (!isLive) return;
@@ -152,7 +154,10 @@ export default function Reports() {
       : ['Invoice number', 'Date', 'Customer', 'Category', 'Taxable amount', 'GST', 'Total', 'Collected', 'Due'];
 
   const headers = isLive ? (serverReport?.headers || []) : demoHeaders;
-  const rows = isLive ? (serverReport?.rows || []) : demoRows;
+  const allRows = isLive ? (serverReport?.rows || []) : demoRows;
+  const rows = filterText.trim()
+    ? allRows.filter(row => row.some(value => String(value ?? '').toLowerCase().includes(filterText.trim().toLowerCase())))
+    : allRows;
   // Summaries use the very same filtered rows as the table and exports.
   const summaryColumns: Record<string, number[]> = {
     Sales: [4, 5, 6, 7, 8],
@@ -183,24 +188,22 @@ export default function Reports() {
     setBusy(true);
     try {
       if (isLive) {
-        const p = new URLSearchParams({
+        const status = paymentStatus === 'Paid' ? 'Paid' : paymentStatus === 'Unpaid / partial' ? 'Unpaid' : 'Issued';
+        const businessCategory = category === 'New goods' ? 'NewGoods' : category === 'Used goods' ? 'UsedGoods' : category === 'Service' ? 'Service' : undefined;
+        const result = await fetchInvoicesPage({
+          page: 1,
+          limit: 100,
+          status,
           dateFrom: from,
           dateTo: to,
+          customerId: customer !== 'All customers' ? customer : undefined,
+          businessCategory,
         });
-        if (customer !== 'All customers') p.set('customerId', customer);
-        const res = await fetch(`/api/sales/invoices/export-zip?${p.toString()}`);
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || 'Export failed.');
-        }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `invoices-${from}-to-${to}.zip`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-        notify('Downloaded filtered invoice PDFs and manifest ZIP.');
+        if (result.total > 100) throw new Error(`The filters match ${result.total} invoices. Narrow the period to 100 or fewer invoices.`);
+        if (!result.records.length) throw new Error('No issued invoices match these filters.');
+        setBatchBills(result.records);
+        setBatch(true);
+        notify('Filtered invoices are ready. Review the exact layout, then download the ZIP.');
       } else {
         const e = await import('@/lib/exports');
         const chosen = bills.filter((b) => selected.includes(b.id));
@@ -330,12 +333,25 @@ export default function Reports() {
                 </Field>
               )}
 
+              <button className="link-button" onClick={() => preset(1)}>
+                Today
+              </button>
               <button className="link-button" onClick={() => preset(7)}>
                 7 days
               </button>
               <button className="link-button" onClick={() => preset(30)}>
                 30 days
               </button>
+              <button className="link-button" onClick={() => preset(90)}>
+                90 days
+              </button>
+
+              <Field label="Search results">
+                <div style={{position: 'relative'}}>
+                  <Search size={14} style={{position: 'absolute', left: 9, top: 10, color: '#64748b'}} />
+                  <input value={filterText} onChange={(event) => setFilterText(event.target.value)} placeholder="Search this report" style={{paddingLeft: 30}} />
+                </div>
+              </Field>
 
               {['Sales', 'Invoice exports', 'Tax summary'].includes(report) && (
                 <select
@@ -506,8 +522,8 @@ export default function Reports() {
       </div>
       {batch && (
         <PrintDialog
-          bills={bills.filter((b) => selected.includes(b.id))}
-          onClose={() => setBatch(false)}
+          bills={batchBills.length ? batchBills : bills.filter((b) => selected.includes(b.id))}
+          onClose={() => {setBatch(false); setBatchBills([]);}}
         />
       )}
     </>

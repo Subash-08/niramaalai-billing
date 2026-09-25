@@ -21,6 +21,7 @@ export function mapCustomerFromApi(doc: any): Customer {
     notes: doc.notes || '',
     details: doc.details || {},
     outstandingDue: (doc.outstandingDuePaise || 0) / 100,
+    totalSales: (doc.totalSalesPaise || 0) / 100,
     invoiceCount: doc.invoiceCount || 0,
     lastActivityDate: doc.lastActivityDate || '',
   };

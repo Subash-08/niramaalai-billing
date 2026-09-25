@@ -178,39 +178,49 @@ export async function listCustomers(identity: Identity, query: PaginationQuery) 
     ];
   }
 
-  const [records, total] = await Promise.all([
-    col(db, 'customers')
-      .find(filter)
-      .sort({createdAt: -1})
-      .skip(skip)
-      .limit(limit)
-      .toArray(),
-    col(db, 'customers').countDocuments(filter),
-  ]);
+  const computedMatch: Record<string, any> = {};
+  if (query.balance === 'Outstanding') computedMatch.outstandingDuePaise = {$gt: 0};
+  if (query.balance === 'Clear') computedMatch.outstandingDuePaise = 0;
+  if (query.minSalesPaise != null || query.maxSalesPaise != null) computedMatch.totalSalesPaise = {
+    ...(query.minSalesPaise != null && {$gte: query.minSalesPaise}),
+    ...(query.maxSalesPaise != null && {$lte: query.maxSalesPaise}),
+  };
+  const sort = query.sortBy === 'name' ? {name: 1, _id: 1}
+    : query.sortBy === 'outstanding' ? {outstandingDuePaise: -1, name: 1}
+    : query.sortBy === 'sales' ? {totalSalesPaise: -1, name: 1}
+    : {createdAt: -1, _id: -1};
 
-  const customerIds = records.map((record: any) => record._id);
-  if (customerIds.length) {
-    const [invoiceDues, openingDues] = await Promise.all([
-      col(db, 'invoices').aggregate([
-        {$match: {tenantId: identity.tenantId, customerId: {$in: customerIds}, status: 'Issued'}},
-        {$group: {_id: '$customerId', outstandingDuePaise: {$sum: '$duePaise'}, invoiceCount: {$sum: 1}, lastActivityDate: {$max: '$invoiceDate'}}},
-      ]).toArray(),
-      col(db, 'openingReceivables').aggregate([
-        {$match: {tenantId: identity.tenantId, customerId: {$in: customerIds}, remainingAmountPaise: {$gt: 0}}},
-        {$group: {_id: '$customerId', outstandingDuePaise: {$sum: '$remainingAmountPaise'}}},
-      ]).toArray(),
-    ]);
-    const invoiceMap = new Map(invoiceDues.map((row: any) => [row._id, row]));
-    const openingMap = new Map(openingDues.map((row: any) => [row._id, row.outstandingDuePaise || 0]));
-    for (const record of records) {
-      const invoice = invoiceMap.get(record._id) as any;
-      record.outstandingDuePaise = (invoice?.outstandingDuePaise || 0) + (openingMap.get(record._id) || 0);
-      record.invoiceCount = invoice?.invoiceCount || 0;
-      record.lastActivityDate = invoice?.lastActivityDate || '';
-    }
-  }
-
-  return {records, total, page, limit, totalPages: Math.ceil(total / limit)};
+  const result = await col(db, 'customers').aggregate([
+    {$match: filter},
+    {$lookup: {
+      from: 'invoices', let: {customerKey: '$_id'},
+      pipeline: [
+        {$match: {$expr: {$and: [{$eq: ['$tenantId', identity.tenantId]}, {$eq: ['$customerId', '$$customerKey']}, {$eq: ['$status', 'Issued']}]}}},
+        {$group: {_id: null, outstandingDuePaise: {$sum: '$duePaise'}, totalSalesPaise: {$sum: '$totalPaise'}, invoiceCount: {$sum: 1}, lastActivityDate: {$max: '$invoiceDate'}}},
+      ], as: 'invoiceStats',
+    }},
+    {$lookup: {
+      from: 'openingReceivables', let: {customerKey: '$_id'},
+      pipeline: [
+        {$match: {$expr: {$and: [{$eq: ['$tenantId', identity.tenantId]}, {$eq: ['$customerId', '$$customerKey']}, {$gt: ['$remainingAmountPaise', 0]}]}}},
+        {$group: {_id: null, outstandingDuePaise: {$sum: '$remainingAmountPaise'}}},
+      ], as: 'openingStats',
+    }},
+    {$addFields: {
+      outstandingDuePaise: {$add: [{$ifNull: [{$arrayElemAt: ['$invoiceStats.outstandingDuePaise', 0]}, 0]}, {$ifNull: [{$arrayElemAt: ['$openingStats.outstandingDuePaise', 0]}, 0]}]},
+      totalSalesPaise: {$ifNull: [{$arrayElemAt: ['$invoiceStats.totalSalesPaise', 0]}, 0]},
+      invoiceCount: {$ifNull: [{$arrayElemAt: ['$invoiceStats.invoiceCount', 0]}, 0]},
+      lastActivityDate: {$ifNull: [{$arrayElemAt: ['$invoiceStats.lastActivityDate', 0]}, '']},
+    }},
+    ...(Object.keys(computedMatch).length ? [{$match: computedMatch}] : []),
+    {$facet: {
+      records: [{$sort: sort}, {$skip: skip}, {$limit: limit}, {$unset: ['invoiceStats', 'openingStats']}],
+      meta: [{$count: 'total'}],
+    }},
+  ]).toArray();
+  const records = result[0]?.records || [];
+  const total = result[0]?.meta?.[0]?.total || 0;
+  return {records, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit))};
 }
 
 export async function getCustomerById(identity: Identity, id: string) {

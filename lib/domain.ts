@@ -4,7 +4,7 @@ export const TODAY = new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Kolkata'}
 export const money = (n:number) => new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(n);
 export const shortMoney = (n:number) => n >= 100000 ? `₹${(n/100000).toFixed(2)}L` : `₹${Math.round(n).toLocaleString('en-IN')}`;
 export const dateLabel = (d:string) => new Date(d+'T12:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
-export type Customer = {id:string;name:string;phone:string;email:string;address:string;gst:string;type:string;notes:string;creditLimit?:number;paymentTerms?:number;status?:string;details?:Record<string,string>;outstandingDue?:number;invoiceCount?:number;lastActivityDate?:string};
+export type Customer = {id:string;name:string;phone:string;email:string;address:string;gst:string;type:string;notes:string;creditLimit?:number;paymentTerms?:number;status?:string;details?:Record<string,string>;outstandingDue?:number;totalSales?:number;invoiceCount?:number;lastActivityDate?:string};
 export type Product = {id:string;name:string;description?:string;unit?:string;category:string;brand:string;condition:'New'|'Used';model:string;hsn:string;cost:number;price:number;tax:number;stock:number;low:number;serials:string[];warranty:number;supplier:string;isSerialTracked?:boolean;status?:string};
 export type Supplier = {id:string;name:string;phone:string;email:string;address:string;gst:string;terms:number;status?:string};
 export type PrintSpecifications = {size?:string;material?:string;gsm?:string;colour?:string;sides?:string;finishing?:string;deliveryDate?:string;notes?:string};

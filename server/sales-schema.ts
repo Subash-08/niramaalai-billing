@@ -135,6 +135,7 @@ export const SalesListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   status: z.enum(['Draft', 'Issued', 'Cancelled', 'Paid', 'PartlyPaid', 'Unpaid', 'Sent', 'Accepted', 'Rejected', 'Converted', 'Expired']).optional(),
   customerId: Id.optional(), search: z.string().trim().max(100).optional(),
+  businessCategory: z.enum(['NewGoods', 'UsedGoods', 'Service']).optional(),
   dateFrom: CalendarDate.optional(), dateTo: CalendarDate.optional(),
   hasDue: z.enum(['true', 'false']).optional(),
 }).refine(v => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, {message: 'Date range is reversed.'});

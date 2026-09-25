@@ -55,11 +55,12 @@ export function TemplateInvoice({
   return (
     <div className="print-area">
       <article
-        className={`invoice-paper template-paper ${t.borders ? '' : 'no-borders'} ${t.striped ? 'striped' : ''} ${
+        className={`invoice-paper template-paper ${bill.status === 'Draft' || bill.status === 'Cancelled' ? 'draft-document' : ''} ${t.borders ? '' : 'no-borders'} ${t.striped ? 'striped' : ''} ${
           t.orientation
         }`}
         style={{'--invoice-accent': t.accent, '--invoice-font': t.fontSize + 'px'} as React.CSSProperties}
       >
+        {(bill.status === 'Draft' || bill.status === 'Cancelled') && <div className="invoice-draft-watermark">{bill.status === 'Draft' ? 'DRAFT · NOT ISSUED' : 'CANCELLED'}</div>}
         <div className="invoice-top">
           <h2>
             {supplier
@@ -225,7 +226,7 @@ export function TemplateInvoice({
               <strong>INR {amountWords(sum.total)}</strong>
             </div>
           )}
-          {f.payments && bill.kind !== 'Quotation' && !supplier && (
+          {f.payments && bill.kind !== 'Quotation' && bill.status !== 'Draft' && !supplier && (
             <div className="invoice-payment">
               <span>Amount received: {money(bill.previewPaid ?? bill.paid ?? paid(state, bill.id))}</span>
               <b>
@@ -341,11 +342,13 @@ export function PrintDialog({bills, onClose}: {bills: Bill[]; onClose: () => voi
         const element = wrapper?.querySelector<HTMLElement>('.invoice-paper');
         if (!element) throw new Error(`Preview for ${bill.id} is not ready. Wait for it to appear and try again.`);
         const billTemplate = userOverrode ? template : ((bill as any).templateSnapshot || state.templates.find((t) => t.id === (bill.templateId || state.defaultTemplateId)) || template);
-        return {name: (bill as any).invoiceNumber || (bill as any).quotationNumber || bill.id, element, template: billTemplate};
+        const rawNum = (bill as any).invoiceNumber || (bill as any).quotationNumber || bill.id;
+        const documentName = bill.status === 'Draft' ? (String(rawNum).startsWith('DRAFT') ? String(rawNum) : `DRAFT_${rawNum}`) : String(rawNum);
+        return {name: documentName, element, template: billTemplate};
       });
       const firstTemplate = entries[0]?.template || template;
       e.downloadBytes(
-        bills.length === 1 ? ((bills[0] as any).invoiceNumber || (bills[0] as any).quotationNumber || bills[0].id) + '.pdf' : 'invoices.zip',
+        bills.length === 1 ? `${entries[0].name}.pdf` : 'invoices.zip',
         bills.length === 1
           ? await e.invoicePreviewPdfBytes(entries[0].element, firstTemplate)
           : await e.invoicePreviewZipBytes(entries),

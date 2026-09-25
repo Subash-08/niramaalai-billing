@@ -83,7 +83,7 @@ type Store = {
   importDemoMasterDataApi: () => Promise<boolean>;
 
   // Server-side pagination and queries
-  fetchCustomersPage: (query?: {page?: number; limit?: number; q?: string; status?: string; type?: string}) => Promise<PaginationResult<Customer>>;
+  fetchCustomersPage: (query?: {page?: number; limit?: number; q?: string; status?: string; type?: string; balance?: string; sortBy?: string; minSales?: number; maxSales?: number}) => Promise<PaginationResult<Customer>>;
   fetchSuppliersPage: (query?: {page?: number; limit?: number; q?: string; status?: string}) => Promise<PaginationResult<Supplier>>;
   fetchProductsPage: (query?: {page?: number; limit?: number; q?: string; category?: string; status?: string}) => Promise<PaginationResult<Product>>;
 
@@ -149,7 +149,7 @@ type Store = {
   saveInvoiceDraftApi: (inv: any, existingId?: string, version?: number) => Promise<{success: boolean; draft?: any; error?: string}>;
   cancelInvoiceDraftApi: (id: string, version?: number, reason?: string) => Promise<{success: boolean; error?: string}>;
   issueInvoiceApi: (id: string, payload: any) => Promise<{success: boolean; invoice?: any; error?: string}>;
-  fetchInvoicesPage: (query?: {page?: number; limit?: number; customerId?: string; status?: string; search?: string; dateFrom?: string; dateTo?: string; hasDue?: boolean}) => Promise<PaginationResult<Bill>>;
+  fetchInvoicesPage: (query?: {page?: number; limit?: number; customerId?: string; status?: string; search?: string; businessCategory?: string; dateFrom?: string; dateTo?: string; hasDue?: boolean}) => Promise<PaginationResult<Bill>>;
   fetchInvoiceDetailApi: (id: string) => Promise<{invoice: any}>;
 
   fetchReservationsPage: (query?: {page?: number; limit?: number; customerId?: string; productId?: string; status?: string; search?: string; dateFrom?: string; dateTo?: string}) => Promise<PaginationResult<Reservation>>;
@@ -939,13 +939,17 @@ export function StoreProvider({children}: {children: ReactNode}) {
 
   // --- Server-Side Pagination Query Methods ---
 
-  async function fetchCustomersPage(query: {page?: number; limit?: number; q?: string; status?: string; type?: string} = {}) {
+  async function fetchCustomersPage(query: {page?: number; limit?: number; q?: string; status?: string; type?: string; balance?: string; sortBy?: string; minSales?: number; maxSales?: number} = {}) {
     const p = new URLSearchParams();
     if (query.page) p.set('page', String(query.page));
     if (query.limit) p.set('limit', String(query.limit));
     if (query.q) p.set('q', query.q);
     if (query.status) p.set('status', query.status);
     if (query.type) p.set('type', query.type);
+    if (query.balance) p.set('balance', query.balance);
+    if (query.sortBy) p.set('sortBy', query.sortBy);
+    if (query.minSales != null) p.set('minSalesPaise', String(Math.round(query.minSales * 100)));
+    if (query.maxSales != null) p.set('maxSalesPaise', String(Math.round(query.maxSales * 100)));
     const res = await fetch(`/api/master/customers?${p.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to load customers');
@@ -1909,6 +1913,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
     customerId?: string;
     status?: string;
     search?: string;
+    businessCategory?: string;
     dateFrom?: string;
     dateTo?: string;
     hasDue?: boolean;
@@ -1919,6 +1924,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
     if (query.customerId) p.set('customerId', query.customerId);
     if (query.status && query.status !== 'All') p.set('status', query.status);
     if (query.search) p.set('q', query.search);
+    if (query.businessCategory) p.set('businessCategory', query.businessCategory);
     if (query.dateFrom) p.set('dateFrom', query.dateFrom);
     if (query.dateTo) p.set('dateTo', query.dateTo);
     if (query.hasDue) p.set('hasDue', 'true');

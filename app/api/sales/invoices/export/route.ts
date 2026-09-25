@@ -30,14 +30,23 @@ export async function GET(request: Request) {
     const dateFrom = url.searchParams.get('dateFrom') || undefined;
     const dateTo = url.searchParams.get('dateTo') || undefined;
     const search = (url.searchParams.get('search') || '').trim().slice(0, 200);
+    const businessCategory = url.searchParams.get('businessCategory') || undefined;
 
     const filter: Record<string, any> = {tenantId: identity.tenantId};
-    if (hasDue) {
+    if (hasDue || status === 'Unpaid') {
       filter.status = 'Issued';
       filter.duePaise = {$gt: 0};
+    } else if (status === 'Paid') {
+      filter.status = 'Issued';
+      filter.duePaise = 0;
+    } else if (status === 'PartlyPaid') {
+      filter.status = 'Issued';
+      filter.paymentStatus = 'PartlyPaid';
+    } else if (status && status !== 'All') {
+      filter.status = status;
     }
     if (customerId) filter.customerId = customerId;
-    if (status && status !== 'All') filter.status = status;
+    if (businessCategory && ['NewGoods', 'UsedGoods', 'Service'].includes(businessCategory)) filter.businessCategory = businessCategory;
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [

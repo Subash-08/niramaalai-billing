@@ -10,9 +10,6 @@ export async function GET(request: Request) {
     const db = await database();
     const url = new URL(request.url);
 
-    const hasDue = url.searchParams.get('hasDue') === 'true';
-    const customerId = url.searchParams.get('customerId') || undefined;
-
-    return getSalesSummary(db, identity, {hasDue, customerId});
+    return getSalesSummary(db, identity, Object.fromEntries(url.searchParams.entries()));
   });
 }

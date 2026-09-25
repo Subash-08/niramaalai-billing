@@ -832,6 +832,7 @@ export function buildSalesFilter(identity: Identity, raw: unknown, kind: 'invoic
     filter.status = 'Issued'; filter.duePaise = {$gt: 0};
   } else if (params.status) filter.status = params.status;
   if (params.customerId) filter.customerId = params.customerId;
+  if (params.businessCategory) filter.businessCategory = params.businessCategory;
   if (params.dateFrom || params.dateTo) filter[kind === 'invoices' ? 'invoiceDate' : 'quotationDate'] = {
     ...(params.dateFrom && {$gte: params.dateFrom}), ...(params.dateTo && {$lte: params.dateTo})};
   if (params.hasDue === 'true') {
@@ -880,12 +881,12 @@ export async function getQuotation(db: Db, identity: Identity, quotationId: stri
 export async function getSalesSummary(
   db: Db,
   identity: Identity,
-  params: {hasDue?: boolean; customerId?: string} = {}
+  params: Record<string, unknown> = {}
 ) {
   const tenantId = identity.tenantId;
-  const matchInvoices: any = {tenantId};
+  const {filter: matchInvoices} = buildSalesFilter(identity, {page: 1, limit: 1, ...params}, 'invoices');
   const matchQuotations: any = {tenantId};
-  if (params.customerId) {
+  if (typeof params.customerId === 'string' && params.customerId) {
     matchInvoices.customerId = params.customerId;
     matchQuotations.customerId = params.customerId;
   }
@@ -941,7 +942,7 @@ export async function getSalesSummary(
       },
     ]).next(),
     col(db, 'customerAdvances').aggregate([
-      {$match: {tenantId, status: {$in: ['Available', 'PartlyConsumed']}}},
+      {$match: {tenantId, status: {$in: ['Available', 'PartlyConsumed']}, ...(typeof params.customerId === 'string' && params.customerId ? {customerId: params.customerId} : {})}},
       {$group: {_id: null, totalRemainingPaise: {$sum: '$remainingAmountPaise'}}},
     ]).next(),
   ]);

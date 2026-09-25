@@ -4,6 +4,8 @@
 
 /* Compact A4 structure based on the supplied tax-invoice reference. */
 .template-paper.invoice-paper{width:794px;min-height:1123px;padding:22px;max-width:794px;box-sizing:border-box;display:flex;flex-direction:column;background:#fff}
+.template-paper.draft-document{position:relative}
+.template-paper .invoice-draft-watermark{position:absolute;z-index:2;top:47%;left:50%;transform:translate(-50%,-50%) rotate(-28deg);font-size:52px;font-weight:800;letter-spacing:5px;color:rgba(150,35,35,.13);white-space:nowrap;pointer-events:none}
 .template-paper .invoice-top{min-height:34px;padding-bottom:6px;align-items:flex-start}
 .template-paper .invoice-top h2{flex:1;text-align:center;font-size:17px}
 .template-paper .invoice-box{flex:1;display:flex;flex-direction:column}

@@ -1,6 +1,6 @@
 'use client';
 import AccountHistory from './account-history';
-import {useState, useEffect} from 'react';
+import {useState, useEffect, useDeferredValue} from 'react';
 import Link from 'next/link';
 import {Plus, ArrowUpRight, Pencil, Phone, Mail, FileText, ArrowLeft, Archive, MessageSquare, Copy, Check, ExternalLink, IndianRupee} from 'lucide-react';
 import {RecordReceiptModal} from './payments';
@@ -328,14 +328,23 @@ ${companyName}${companyPhone ? `\nPhone: ${companyPhone}` : ''}`;
   };
 
   const handleOpenWhatsApp = () => {
-    const rawDigits = phone.replace(/\D/g, '');
-    if (!rawDigits || rawDigits.length < 10) {
-      notify('Please enter a valid 10+ digit customer phone number for WhatsApp.');
+    let digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('0') && digits.length === 11) {
+      digits = digits.slice(1);
+    }
+    if (digits.length === 10) {
+      digits = `91${digits}`;
+    }
+    if (digits.length !== 12 || !digits.startsWith('91')) {
+      notify('Please enter a valid 10-digit customer phone number for WhatsApp.');
       return;
     }
-    const targetPhone = rawDigits.length === 10 ? '91' + rawDigits : rawDigits;
-    const url = `https://wa.me/${targetPhone}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const url = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      notify('Could not open WhatsApp. Please check popup permissions.');
+    }
   };
 
   return (
@@ -400,8 +409,15 @@ ${companyName}${companyPhone ? `\nPhone: ${companyPhone}` : ''}`;
 export default function People({supplier = false, id}: {supplier?: boolean; id?: string}) {
   const {state, isLive, notify, fetchCustomersPage, fetchSuppliersPage, fetchCustomerProfileApi} = useStore();
   const [q, setQ] = useState('');
+  const deferredQ = useDeferredValue(q);
   const [edit, setEdit] = useState(false);
   const [type, setType] = useState('All');
+  const [balanceFilter, setBalanceFilter] = useState('All');
+  const [sortBy, setSortBy] = useState('recent');
+  const [minSales, setMinSales] = useState('');
+  const [maxSales, setMaxSales] = useState('');
+  const deferredMinSales = useDeferredValue(minSales);
+  const deferredMaxSales = useDeferredValue(maxSales);
   const [page, setPage] = useState(1);
   const [serverData, setServerData] = useState<{records: any[]; total: number; totalPages: number} | null>(null);
   const [listLoading, setListLoading] = useState(false);
@@ -428,7 +444,7 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
 
   useEffect(() => {
     setPage(1);
-  }, [q, type, supplier]);
+  }, [deferredQ, type, balanceFilter, sortBy, deferredMinSales, deferredMaxSales, supplier]);
 
   useEffect(() => {
     if (isLive && !isDetailRoute) {
@@ -439,8 +455,14 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
       fetchFn({
         page,
         limit: 10,
-        q: q.trim() || undefined,
+        q: deferredQ.trim() || undefined,
         ...(supplier || type === 'All' ? {} : {type}),
+        ...(!supplier ? {
+          balance: balanceFilter,
+          sortBy,
+          minSales: deferredMinSales === '' ? undefined : Number(deferredMinSales),
+          maxSales: deferredMaxSales === '' ? undefined : Number(deferredMaxSales),
+        } : {}),
       })
         .then((res) => {
           if (!active) return;
@@ -460,7 +482,7 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
         active = false;
       };
     }
-  }, [isLive, supplier, page, q, type, isDetailRoute, refreshIndex, fetchCustomersPage, fetchSuppliersPage]);
+  }, [isLive, supplier, page, deferredQ, type, balanceFilter, sortBy, deferredMinSales, deferredMaxSales, isDetailRoute, refreshIndex, fetchCustomersPage, fetchSuppliersPage]);
 
   useEffect(() => {
     if (!isLive || !isDetailRoute || !id) return;
@@ -510,6 +532,28 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
   const person = isDetailRoute
     ? (detailRecord || (supplier ? state.suppliers : state.customers).find((p) => p.id === id) || (serverData?.records || []).find((p) => p.id === id) || null)
     : null;
+
+  function openGreetingWhatsApp() {
+    if (!person || supplier) return;
+    let digits = String(person.phone || '').replace(/\D/g, '');
+    if (digits.startsWith('0') && digits.length === 11) {
+      digits = digits.slice(1);
+    }
+    if (digits.length === 10) {
+      digits = `91${digits}`;
+    }
+    if (digits.length !== 12 || !digits.startsWith('91')) {
+      return notify('Add a valid 10-digit customer phone number before opening WhatsApp.');
+    }
+    const phone = digits;
+    const business = state.settings.name || 'our print shop';
+    const message = `Dear ${person.name},\n\nThank you for visiting ${business}. We appreciate the opportunity to help with your printing requirements. Please contact us anytime if you need another print, design, or branding service.\n\nWe look forward to serving you again.\n${business}${state.settings.phone ? `\nPhone: ${state.settings.phone}` : ''}`;
+    try {
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+    } catch {
+      notify('Could not open WhatsApp. Please check popup permissions.');
+    }
+  }
   const path = '/customers';
 
   if (isDetailRoute && isLive && detailLoading) return <Empty title="Loading record…" />;
@@ -579,6 +623,9 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
               <Btn secondary onClick={() => setShowReminder(true)}>
                 <MessageSquare size={15} /> Payment reminder
               </Btn>
+              {!supplier && <Btn secondary onClick={openGreetingWhatsApp} style={{background: '#25D366', color: '#fff', borderColor: '#25D366'}}>
+                <MessageSquare size={15} /> Thank-you WhatsApp
+              </Btn>}
               <Btn onClick={() => setEdit(true)}>
                 <Pencil size={15} /> Edit details
               </Btn>
@@ -758,11 +805,19 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
               placeholder={`Search ${supplier ? 'supplier' : 'customer'} name or phone…`}
             />
             {!supplier && (
-              <select aria-label="Customer type filter" value={type} onChange={(e) => setType(e.target.value)}>
-                <option>All</option>
-                <option>Individual</option>
-                <option>Business</option>
-              </select>
+              <>
+                <select aria-label="Customer type filter" value={type} onChange={(e) => setType(e.target.value)}>
+                  <option>All</option><option>Individual</option><option>Business</option>
+                </select>
+                <select aria-label="Outstanding filter" value={balanceFilter} onChange={(e) => setBalanceFilter(e.target.value)}>
+                  <option value="All">All balances</option><option value="Outstanding">Has outstanding</option><option value="Clear">No outstanding</option>
+                </select>
+                <select aria-label="Customer sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                  <option value="recent">Recently added</option><option value="name">Name</option><option value="outstanding">Highest outstanding</option><option value="sales">Highest sales</option>
+                </select>
+                <input aria-label="Minimum sales" type="number" min="0" step="100" placeholder="Min sales ₹" value={minSales} onChange={(e) => setMinSales(e.target.value)} />
+                <input aria-label="Maximum sales" type="number" min="0" step="100" placeholder="Max sales ₹" value={maxSales} onChange={(e) => setMaxSales(e.target.value)} />
+              </>
             )}
             <span className="muted">
               {isLive && serverData ? serverData.total : collection.length} {supplier ? 'suppliers' : 'customers'}
@@ -792,6 +847,7 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
                     <th>Contact</th>
                     <th>{supplier ? 'Credit period' : 'GSTIN'}</th>
                     <th>Outstanding</th>
+                    {!supplier && <th>Total sales</th>}
                     {!supplier && <th>Sales activity</th>}
                     <th />
                   </tr>
@@ -831,6 +887,7 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
                         </td>
                         <td>{supplier ? `${(p as Supplier).terms} days` : (p as Customer).gst || 'Not provided'}</td>
                         <td className="amount">{money(isLive && !supplier ? ((p as Customer).outstandingDue || 0) : docs.reduce((a, b) => a + balance(state, b), 0))}</td>
+                        {!supplier && <td className="amount">{money(isLive ? ((p as Customer).totalSales || 0) : docs.reduce((a, b) => a + roundedTotal(b), 0))}</td>}
                         {!supplier && <td>{isLive ? `${(p as Customer).invoiceCount || 0} invoice(s)` : `${docs.length} invoice(s)`}<small>{(p as Customer).lastActivityDate ? `Last: ${(p as Customer).lastActivityDate}` : 'No completed sales'}</small></td>}
                         <td>
                           <Link className="text-link" href={path + '/' + p.id}>

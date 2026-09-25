@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useDeferredValue } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -17,6 +17,7 @@ import {
   AlertCircle,
   RotateCcw,
   Archive,
+  MessageCircle,
 } from 'lucide-react';
 import { uploadFile } from '@/lib/upload';
 import {
@@ -2229,26 +2230,32 @@ export default function Documents({
   const searchParams = useSearchParams();
 
   const [q, setQ] = useState(() => searchParams?.get('search') || searchParams?.get('q') || '');
-  const [status, setStatus] = useState('All');
+  const deferredQ = useDeferredValue(q);
+  const [status, setStatus] = useState(() => searchParams?.get('status') || 'All');
   const [docStatusFilter, setDocStatusFilter] = useState(() => searchParams?.get('docStatus') || 'All');
   const [billStatusFilter, setBillStatusFilter] = useState(() => searchParams?.get('billStatus') || 'All');
   const [receiptStatusFilter, setReceiptStatusFilter] = useState(() => searchParams?.get('receiptStatus') || 'All');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState(() => searchParams?.get('paymentStatus') || 'All');
   const [payment, setPayment] = useState(false);
   const [date, setDate] = useState(() => searchParams?.get('date') || '');
+  const [dateFrom, setDateFrom] = useState(() => searchParams?.get('dateFrom') || '');
+  const [dateTo, setDateTo] = useState(() => searchParams?.get('dateTo') || '');
   const [cancel, setCancel] = useState(false);
   const [print, setPrint] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState('All categories');
+  const [categoryFilter, setCategoryFilter] = useState(() => searchParams?.get('category') || 'All categories');
   const [purchasePage, setPurchasePage] = useState(() => Math.max(1, parseInt(searchParams?.get('page') || '1', 10)));
   const [quotationPage, setQuotationPage] = useState(1);
   const [quotationPageData, setQuotationPageData] = useState<{ records: Bill[]; total: number; totalPages: number } | null>(null);
   const [quotationListLoading, setQuotationListLoading] = useState(false);
 
-  const [invoicePage, setInvoicePage] = useState(1);
+  const [invoicePage, setInvoicePage] = useState(() => Math.max(1, parseInt(searchParams?.get('page') || '1', 10)));
   const [invoicePageData, setInvoicePageData] = useState<{ records: Bill[]; total: number; totalPages: number } | null>(null);
   const [invoiceListLoading, setInvoiceListLoading] = useState(false);
+  const [filteredBatchBills, setFilteredBatchBills] = useState<Bill[]>([]);
+  const [filteredBatchLoading, setFilteredBatchLoading] = useState(false);
 
   const [salesSummary, setSalesSummary] = useState<any>(null);
+  const salesCategoryValue = categoryFilter === 'New goods' ? 'NewGoods' : categoryFilter === 'Used goods' ? 'UsedGoods' : categoryFilter === 'Service' ? 'Service' : undefined;
 
   // Live Modals for Quotation & Invoice
   const [issueModalOpen, setIssueModalOpen] = useState(false);
@@ -2274,6 +2281,18 @@ export default function Documents({
     if (purchasePage > 1) url.searchParams.set('page', String(purchasePage)); else url.searchParams.delete('page');
     window.history.replaceState(null, '', url.pathname + url.search);
   }, [purchase, id, q, docStatusFilter, billStatusFilter, receiptStatusFilter, paymentStatusFilter, date, purchasePage]);
+
+  useEffect(() => {
+    if (purchase || quotation || id) return;
+    const url = new URL(window.location.href);
+    if (q.trim()) url.searchParams.set('q', q.trim()); else url.searchParams.delete('q');
+    if (status !== 'All') url.searchParams.set('status', status); else url.searchParams.delete('status');
+    if (categoryFilter !== 'All categories') url.searchParams.set('category', categoryFilter); else url.searchParams.delete('category');
+    if (dateFrom) url.searchParams.set('dateFrom', dateFrom); else url.searchParams.delete('dateFrom');
+    if (dateTo) url.searchParams.set('dateTo', dateTo); else url.searchParams.delete('dateTo');
+    if (invoicePage > 1) url.searchParams.set('page', String(invoicePage)); else url.searchParams.delete('page');
+    window.history.replaceState(null, '', url.pathname + url.search);
+  }, [purchase, quotation, id, q, status, categoryFilter, dateFrom, dateTo, invoicePage]);
 
   // Detail view state
   const [detailData, setDetailData] = useState<any>(null);
@@ -2479,14 +2498,23 @@ export default function Documents({
 
   useEffect(() => {
     if (!purchase && !id && isLive) {
-      fetch('/api/sales/summary')
+      const query = new URLSearchParams();
+      if (!quotation) {
+        if (deferredQ.trim()) query.set('search', deferredQ.trim());
+        if (status !== 'All') query.set('status', status);
+        if (status === 'Unpaid') query.set('hasDue', 'true');
+        if (salesCategoryValue) query.set('businessCategory', salesCategoryValue);
+        if (dateFrom) query.set('dateFrom', dateFrom);
+        if (dateTo) query.set('dateTo', dateTo);
+      }
+      fetch(`/api/sales/summary?${query.toString()}`)
         .then((r) => r.json())
         .then((data) => {
           setSalesSummary(data.summary || data);
         })
         .catch(() => { });
     }
-  }, [purchase, id, isLive]);
+  }, [purchase, quotation, id, isLive, deferredQ, status, salesCategoryValue, dateFrom, dateTo]);
 
   useEffect(() => {
     if (!purchase || id || !isLive) return;
@@ -2527,15 +2555,16 @@ export default function Documents({
     fetchInvoicesPage({
       page: invoicePage,
       limit: 20,
-      search: q.trim() || undefined,
+      search: deferredQ.trim() || undefined,
       status: status === 'All' ? undefined : status,
       hasDue: status === 'Unpaid' ? true : undefined,
-      dateFrom: date || undefined,
-      dateTo: date || undefined,
+      businessCategory: salesCategoryValue,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
     }).then(setInvoicePageData).catch(() => notify('Could not load invoices.')).finally(() => setInvoiceListLoading(false));
-  }, [quotation, purchase, id, isLive, invoicePage, q, status, date, fetchInvoicesPage, notify]);
+  }, [quotation, purchase, id, isLive, invoicePage, deferredQ, status, categoryFilter, dateFrom, dateTo, fetchInvoicesPage, notify]);
 
-  useEffect(() => { setInvoicePage(1); }, [q, status, date]);
+  useEffect(() => { setInvoicePage(1); }, [deferredQ, status, categoryFilter, dateFrom, dateTo]);
 
   const list = (
     purchase
@@ -2549,7 +2578,9 @@ export default function Documents({
       ? state.suppliers.find((c) => c.id === (b as Purchase).supplierId)
       : state.customers.find((c) => c.id === (b as Bill).customerId);
     const matchSearch = (b.id + (p?.name || '')).toLowerCase().includes(q.toLowerCase());
-    const matchDate = !date || b.date === date;
+    const matchDate = purchase || quotation
+      ? (!date || b.date === date)
+      : (!dateFrom || b.date >= dateFrom) && (!dateTo || b.date <= dateTo);
     const matchCat = purchase || quotation || categoryFilter === 'All categories' || (b as Bill).category === categoryFilter;
 
     if (purchase) {
@@ -2595,7 +2626,9 @@ export default function Documents({
     if (q.trim()) query.set('search', q.trim());
     if (status !== 'All') query.set('status', status);
     if (status === 'Unpaid') query.set('hasDue', 'true');
-    if (date) { query.set('dateFrom', date); query.set('dateTo', date); }
+    if (salesCategoryValue) query.set('businessCategory', salesCategoryValue);
+    if (dateFrom) query.set('dateFrom', dateFrom);
+    if (dateTo) query.set('dateTo', dateTo);
     return `/api/sales/invoices/export?${query.toString()}`;
   };
 
@@ -2628,6 +2661,62 @@ export default function Documents({
       ? state.suppliers.find((c) => c.id === (record as Purchase).supplierId)
       : state.customers.find((c) => c.id === (record as Bill).customerId)
     : null;
+
+  function applySalesPeriod(days: number) {
+    const end = TODAY;
+    const start = new Date(new Date(`${TODAY}T12:00:00`).getTime() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    setDateFrom(start);
+    setDateTo(end);
+  }
+
+  async function openFilteredBatchPreview() {
+    setFilteredBatchLoading(true);
+    try {
+      const result = await fetchInvoicesPage({
+        page: 1,
+        limit: 100,
+        search: deferredQ.trim() || undefined,
+        status: status === 'All' ? undefined : status,
+        hasDue: status === 'Unpaid' ? true : undefined,
+        businessCategory: salesCategoryValue,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      });
+      if (result.total > 100) throw new Error(`The filters match ${result.total} invoices. Narrow the date range to 100 or fewer before creating the ZIP.`);
+      if (!result.records.length) throw new Error('No invoices match the current filters.');
+      setFilteredBatchBills(result.records);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not prepare filtered invoices.');
+    } finally {
+      setFilteredBatchLoading(false);
+    }
+  }
+
+  function openInvoiceWhatsApp(invoice: Bill) {
+    const snapshot = (invoice as any).customerSnapshot || customer || {};
+    let rawDigits = String(invoice.billTo?.phone || snapshot.phone || '').replace(/\D/g, '');
+    if (rawDigits.startsWith('0') && rawDigits.length === 11) {
+      rawDigits = rawDigits.slice(1);
+    }
+    if (rawDigits.length === 10) {
+      rawDigits = `91${rawDigits}`;
+    }
+    if (rawDigits.length !== 12 || !rawDigits.startsWith('91')) {
+      return notify('Add a valid 10-digit customer phone number before opening WhatsApp.');
+    }
+    const phone = rawDigits;
+    const number = (invoice as any).invoiceNumber || invoice.id;
+    const invoiceTotal = (invoice as any).total ?? roundedTotal(invoice);
+    const invoiceDue = (invoice as any).dueAmount ?? balance(state, invoice);
+    const message = invoice.status === 'Draft'
+      ? `Dear ${snapshot.name || invoice.billTo?.name || 'Customer'},\n\nPlease find draft invoice ${number} for ${money(invoiceTotal)} from ${state.settings.name || 'our billing team'}. This draft is not yet issued and may still change.\n\nThank you.`
+      : `Dear ${snapshot.name || invoice.billTo?.name || 'Customer'},\n\nInvoice ${number} for ${money(invoiceTotal)} has been issued by ${state.settings.name || 'our billing team'}. Balance due: ${money(invoiceDue)}.\n\nPlease download the PDF here and attach it in WhatsApp before sending. Thank you for your business.`;
+    try {
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+    } catch {
+      notify('Could not open WhatsApp. Please check popup permissions.');
+    }
+  }
 
   async function handleExecuteReversal(e: React.FormEvent) {
     e.preventDefault();
@@ -2690,7 +2779,12 @@ export default function Documents({
               {!purchase && (
                 <Btn secondary onClick={() => setPrint(true)}>
                   <Printer size={16} />
-                  Print / PDF
+                  {record.status === 'Draft' ? 'Print draft / PDF' : 'Print / PDF'}
+                </Btn>
+              )}
+              {!purchase && !quotation && (
+                <Btn secondary onClick={() => openInvoiceWhatsApp(record as Bill)}>
+                  <MessageCircle size={16} /> WhatsApp
                 </Btn>
               )}
               {!purchase && !quotation && record.status === 'Issued' && (
@@ -2795,10 +2889,10 @@ export default function Documents({
                     <Download size={14} />
                     PDF
                   </Btn>
-                  <span title="Download all invoices as a ZIP archive of PDFs">
-                    <Btn secondary onClick={() => window.open('/api/sales/invoices/export-zip', '_blank')}>
+                  <span title="Preview every invoice matching the current filters, then download exact-layout PDFs as a ZIP">
+                    <Btn secondary disabled={filteredBatchLoading} onClick={openFilteredBatchPreview}>
                       <Archive size={14} />
-                      Batch PDFs ZIP
+                      {filteredBatchLoading ? 'Preparing…' : 'Filtered PDF ZIP'}
                     </Btn>
                   </span>
                 </div>
@@ -2916,14 +3010,14 @@ export default function Documents({
             </Card>
             <Card title="Gross invoiced">
               <div className="body-pad">
-                <h2>{money(salesSummary?.invoices?.grossTotalPaise != null ? salesSummary.invoices.grossTotalPaise / 100 : list.reduce((n, b) => n + roundedTotal(b), 0))}</h2>
+                <h2>{money(salesSummary?.invoices?.totalSalesPaise != null ? salesSummary.invoices.totalSalesPaise / 100 : list.reduce((n, b) => n + roundedTotal(b), 0))}</h2>
                 <p>Total bill value</p>
               </div>
             </Card>
             <Card title="Payments collected">
               <div className="body-pad">
                 <h2 style={{ color: 'var(--success, #2e7d32)' }}>
-                  {money(salesSummary?.invoices?.paidPaise != null ? salesSummary.invoices.paidPaise / 100 : list.reduce((n, b) => n + paid(state, b.id), 0))}
+                  {money(salesSummary?.invoices?.totalPaidPaise != null ? salesSummary.invoices.totalPaidPaise / 100 : list.reduce((n, b) => n + paid(state, b.id), 0))}
                 </h2>
                 <p>Settled receipts</p>
               </div>
@@ -2931,14 +3025,14 @@ export default function Documents({
             <Card title="Outstanding dues">
               <div className="body-pad" role="button" tabIndex={0} onClick={() => setStatus('Unpaid')}>
                 <h2 style={{ color: 'var(--error, #e53935)' }}>
-                  {money(salesSummary?.invoices?.duePaise != null ? salesSummary.invoices.duePaise / 100 : list.reduce((n, b) => n + balance(state, b), 0))}
+                  {money(salesSummary?.invoices?.totalDuePaise != null ? salesSummary.invoices.totalDuePaise / 100 : list.reduce((n, b) => n + balance(state, b), 0))}
                 </h2>
                 <p>Pending customer collections</p>
               </div>
             </Card>
             <Card title="Available advances">
               <div className="body-pad">
-                <h2>{money(salesSummary?.advances?.availablePaise != null ? salesSummary.advances.availablePaise / 100 : 0)}</h2>
+                <h2>{money(salesSummary?.totalCustomerAdvanceAvailablePaise != null ? salesSummary.totalCustomerAdvanceAvailablePaise / 100 : 0)}</h2>
                 <p>Customer prepaid deposits</p>
               </div>
             </Card>
@@ -2962,7 +3056,7 @@ export default function Documents({
             <span>
               Total <b>{money(roundedTotal(record))}</b>
             </span>
-            {!quotation && (
+            {!quotation && record.status !== 'Draft' && (
               <>
                 <span>
                   Paid <b>{money(isLive && (record as any).paidAmount != null ? (record as any).paidAmount : paid(state, record.id))}</b>
@@ -2985,6 +3079,7 @@ export default function Documents({
                 </Badge>
               </>
             )}
+            {!quotation && record.status === 'Draft' && <Badge>Not issued · no receipt</Badge>}
           </div>
 
           {purchase ? (
@@ -3488,16 +3583,20 @@ export default function Documents({
               </select>
             )}
 
-            <input
-              aria-label="Document date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-            {date && (
-              <button type="button" className="link-button" onClick={() => setDate('')}>
-                Clear date
-              </button>
+            {!purchase && !quotation ? (
+              <>
+                <button type="button" className="link-button" onClick={() => applySalesPeriod(1)}>Today</button>
+                <button type="button" className="link-button" onClick={() => applySalesPeriod(7)}>7 days</button>
+                <button type="button" className="link-button" onClick={() => applySalesPeriod(30)}>30 days</button>
+                <Field label="From"><input aria-label="Sales from date" type="date" value={dateFrom} max={dateTo || TODAY} onChange={(e) => setDateFrom(e.target.value)} /></Field>
+                <Field label="To"><input aria-label="Sales to date" type="date" value={dateTo} min={dateFrom} max={TODAY} onChange={(e) => setDateTo(e.target.value)} /></Field>
+                {(dateFrom || dateTo) && <button type="button" className="link-button" onClick={() => {setDateFrom(''); setDateTo('');}}>All dates</button>}
+              </>
+            ) : (
+              <>
+                <input aria-label="Document date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                {date && <button type="button" className="link-button" onClick={() => setDate('')}>Clear date</button>}
+              </>
             )}
           </div>
 
@@ -3538,7 +3637,7 @@ export default function Documents({
                     </td>
                     <td>{dateLabel(b.date)}</td>
                     <td className="amount">{money(purchase && isLive ? (b as Purchase).total || 0 : isLive && (b as any).total != null ? (b as any).total : roundedTotal(b))}</td>
-                    {!quotation && <td>{money(purchase && isLive ? (b as Purchase).dueAmount || 0 : isLive && (b as any).dueAmount != null ? (b as any).dueAmount : balance(state, b))}</td>}
+                    {!quotation && <td>{b.status === 'Draft' ? '—' : money(purchase && isLive ? (b as Purchase).dueAmount || 0 : isLive && (b as any).dueAmount != null ? (b as any).dueAmount : balance(state, b))}</td>}
                     <td>
                       {purchase ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-start' }}>
@@ -3764,6 +3863,9 @@ export default function Documents({
           docData={record as any}
           onClose={() => setDeliveryChallanOpen(false)}
         />
+      )}
+      {!!filteredBatchBills.length && (
+        <PrintDialog bills={filteredBatchBills} onClose={() => setFilteredBatchBills([])} />
       )}
     </>
   );

@@ -14,6 +14,10 @@ export async function GET(request: Request) {
       q: url.searchParams.get('q') || '',
       status: url.searchParams.get('status') || 'Active',
       type: url.searchParams.get('type') || undefined,
+      balance: url.searchParams.get('balance') || 'All',
+      sortBy: url.searchParams.get('sortBy') || 'recent',
+      minSalesPaise: url.searchParams.get('minSalesPaise') || undefined,
+      maxSalesPaise: url.searchParams.get('maxSalesPaise') || undefined,
     });
     return listCustomers(identity, query);
   });

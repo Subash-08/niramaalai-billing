@@ -292,6 +292,12 @@ export const PaginationQuerySchema = z.object({
   category: z.string().trim().max(80).optional(),
   type: z.enum(['Individual', 'Business', 'Dealer']).optional(),
   status: z.enum(['Active', 'Archived', 'All']).optional().default('Active'),
+  balance: z.enum(['All', 'Outstanding', 'Clear']).optional().default('All'),
+  sortBy: z.enum(['recent', 'name', 'outstanding', 'sales']).optional().default('recent'),
+  minSalesPaise: z.coerce.number().int().min(0).optional(),
+  maxSalesPaise: z.coerce.number().int().min(0).optional(),
+}).refine(value => value.minSalesPaise == null || value.maxSalesPaise == null || value.minSalesPaise <= value.maxSalesPaise, {
+  message: 'Minimum sales cannot exceed maximum sales.', path: ['maxSalesPaise'],
 });
 
 export type PaginationQuery = z.infer<typeof PaginationQuerySchema>;
