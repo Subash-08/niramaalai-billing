@@ -75,10 +75,13 @@ export function getTrustedOrigins(): string[] {
   const canonical = getCanonicalOrigin();
   allowed.add(canonical);
 
+  // Approved production domains
+  allowed.add('https://niramaalai-billing.vercel.app');
+  allowed.add('https://niramaalai.nkmoderntechnology.com');
+
   if (process.env.VERCEL) {
     if (process.env.VERCEL_URL) allowed.add(`https://${process.env.VERCEL_URL}`);
     if (process.env.VERCEL_PROJECT_PRODUCTION_URL) allowed.add(`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`);
-    allowed.add('https://niramaalai-billing.vercel.app');
   }
 
   // Additional approved origins (e.g. approved custom domains or preview deployments)
@@ -104,7 +107,7 @@ export function getTrustedOrigins(): string[] {
 
 export function isAllowedOrigin(origin: string | null | undefined): boolean {
   if (!origin || typeof origin !== 'string') return false;
-  const trimmed = origin.trim();
-  const trusted = getTrustedOrigins();
+  const trimmed = origin.trim().replace(/\/$/, '');
+  const trusted = getTrustedOrigins().map((item) => item.replace(/\/$/, ''));
   return trusted.includes(trimmed);
 }
