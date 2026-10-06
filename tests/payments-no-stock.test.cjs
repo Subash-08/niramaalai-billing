@@ -37,6 +37,28 @@ function matchesFilter(item, filter) {
 }
 
 function applyUpdate(item, update) {
+  if (Array.isArray(update)) {
+    for (const stage of update) {
+      if (stage.$set) {
+        for (const [k, v] of Object.entries(stage.$set)) {
+          if (v && typeof v === 'object' && v.$add) {
+            const addParts = v.$add.map(part => {
+              if (part && typeof part === 'object' && part.$ifNull) {
+                const [fieldRef, fallback] = part.$ifNull;
+                const fieldName = fieldRef.replace(/^\$/, '');
+                return item[fieldName] !== undefined ? item[fieldName] : fallback;
+              }
+              return typeof part === 'number' ? part : 0;
+            });
+            item[k] = addParts.reduce((a, b) => a + b, 0);
+          } else {
+            item[k] = v;
+          }
+        }
+      }
+    }
+    return item;
+  }
   if (update.$setOnInsert) {
     for (const [k, v] of Object.entries(update.$setOnInsert)) {
       if (item[k] === undefined) item[k] = v;

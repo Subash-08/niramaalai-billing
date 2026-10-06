@@ -30,6 +30,7 @@ export function normalizePhone(p: string): string {
 export const CompanySettingsSchema = z.object({
   name: z.string().trim().min(1, 'Company name is required').max(120),
   phone: z.string().trim().min(5).max(20),
+  alternatePhone: z.string().trim().max(20).optional().default(''),
   email: z.string().trim().email('Invalid email address').or(z.literal('')),
   address: z.string().trim().max(500),
   gst: z.string().trim().regex(gstinRegex, 'Invalid GSTIN format').or(z.literal('')),
@@ -37,11 +38,20 @@ export const CompanySettingsSchema = z.object({
   stateCode: z.string().trim().regex(/^\d{2}$/, 'State code must contain exactly 2 digits').or(z.literal('')).optional().default(''),
   postalCode: z.string().trim().regex(/^\d{6}$/, 'Postal code must contain exactly 6 digits').or(z.literal('')).optional().default(''),
   bank: z.string().trim().max(100),
+  bankBranch: z.string().trim().max(100).optional().default(''),
   account: z.string().trim().max(50),
   ifsc: z.string().trim().max(20),
   declaration: z.string().trim().max(1000),
+  invoiceHeaderSubtitle: z.string().trim().max(80).optional().default(''),
+  invoiceNumberLabel: z.string().trim().min(1).max(40).optional().default('Invoice No'),
+  invoicePrefix: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/, 'Use letters, numbers, hyphens or underscores').optional().default('INV'),
+  serviceInvoicePrefix: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/, 'Use letters, numbers, hyphens or underscores').optional().default('SRV'),
+  invoiceStartNumber: z.number().int().min(1).max(999999999).optional().default(1),
+  invoiceNumberPadding: z.number().int().min(0).max(9).optional().default(4),
+  invoiceIncludeFinancialYear: z.boolean().optional().default(true),
+  invoiceNumberSeparator: z.enum(['-', '/', '_', '']).optional().default('-'),
   logoFileId: z.string().trim().max(100).optional(),
-}).strict();
+}).strict().refine(value => value.invoicePrefix.toUpperCase() !== value.serviceInvoicePrefix.toUpperCase(), {message: 'Sales and service invoice prefixes must be different.', path: ['serviceInvoicePrefix']});
 
 export type CompanySettingsInput = z.infer<typeof CompanySettingsSchema>;
 
@@ -149,14 +159,15 @@ export type ServiceCatalogInput = z.infer<typeof ServiceCatalogInputSchema>;
 export const TEMPLATE_FIELD_KEYS = [
   'logo', 'shopName', 'shopAddress', 'shopGst', 'shopPhone', 'shopEmail',
   'customerName', 'customerAddress', 'customerPhone', 'customerGst', 'shipping',
-  'number', 'date', 'due', 'reference', 'order', 'delivery', 'dispatch', 'destination',
+  'number', 'date', 'reverseCharge', 'stateDetails', 'transportMode', 'vehicleNumber', 'supplyDate',
+  'due', 'reference', 'order', 'delivery', 'dispatch', 'destination',
   'serials', 'model', 'warranty', 'subtotal', 'taxes', 'grandTotal', 'amountWords',
-  'taxSummary', 'payments', 'bank', 'notes', 'declaration', 'signatures', 'footer'
+  'packing', 'roundOff', 'taxSummary', 'payments', 'bank', 'notes', 'declaration', 'signatures', 'receiverSignature', 'footer'
 ] as const;
 
 export const TEMPLATE_COLUMN_IDS = [
-  'index', 'description', 'hsn', 'tax', 'qty', 'rateIncl', 'rateExcl',
-  'discount', 'warranty', 'amount'
+  'index', 'description', 'hsn', 'tax', 'qty', 'unit', 'rateIncl', 'rateExcl',
+  'gross', 'discount', 'warranty', 'amount'
 ] as const;
 
 export const TemplateColumnSchema = z.object({
@@ -164,6 +175,7 @@ export const TemplateColumnSchema = z.object({
   label: z.string().trim().min(1).max(80),
   show: z.boolean(),
   align: z.enum(['left', 'right', 'center']),
+  width: z.number().min(3).max(60).optional(),
 });
 
 export const InvoiceTemplateInputSchema = z.object({
@@ -172,7 +184,21 @@ export const InvoiceTemplateInputSchema = z.object({
   paper: z.enum(['A4', 'Letter']).default('A4'),
   orientation: z.enum(['portrait', 'landscape']).default('portrait'),
   fontSize: z.number().int().min(9).max(16).default(11),
+  headingFontSize: z.number().int().min(9).max(24).default(11),
+  fontFamily: z.enum(['Arial', 'Helvetica', 'Georgia', 'Times New Roman']).default('Arial'),
+  fontWeight: z.union([z.literal(400), z.literal(500), z.literal(600), z.literal(700)]).default(500),
   accent: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid hex accent color').default('#373737'),
+  textColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).default('#111111'),
+  lineColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).default('#222222'),
+  lineWidth: z.number().min(0.3).max(2).default(0.8),
+  titleBackground: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).default('#1f1f1f'),
+  titleColor: z.string().trim().regex(/^#[0-9a-fA-F]{6}$/).default('#ffffff'),
+  pageMarginMm: z.number().min(5).max(25).default(11),
+  topReserveMm: z.number().min(0).max(60).default(34),
+  bottomReserveMm: z.number().min(0).max(40).default(20),
+  itemAreaMinHeightMm: z.number().min(60).max(160).default(108),
+  headerMode: z.enum(['digital', 'preprinted', 'hidden']).default('preprinted'),
+  footerMode: z.enum(['digital', 'preprinted', 'hidden']).default('preprinted'),
   borders: z.boolean().default(true),
   striped: z.boolean().default(false),
   logoPosition: z.enum(['left', 'center', 'right']).default('left'),
@@ -183,17 +209,24 @@ export const InvoiceTemplateInputSchema = z.object({
     const visible = cols.filter((c) => c.show);
     const ids = cols.map((c) => c.id);
     const uniqueIds = new Set(ids);
-    return visible.length >= 2 && ids.length === uniqueIds.size;
-  }, 'At least two visible unique columns are required').default([
+    const widthsAreValid = !visible.every(column => column.width != null) || Math.abs(visible.reduce((sum, column) => sum + (column.width || 0), 0) - 100) <= 1;
+    return visible.length >= 2 && ids.length === uniqueIds.size && widthsAreValid;
+  }, 'Keep at least two unique columns. If every visible column has a width, their widths must total 100%.').default([
     {id: 'index', label: '#', show: true, align: 'left'},
     {id: 'description', label: 'Item & Description', show: true, align: 'left'},
     {id: 'qty', label: 'Qty', show: true, align: 'right'},
     {id: 'amount', label: 'Amount', show: true, align: 'right'},
   ]),
   footer: z.string().trim().max(300).default('This is a computer generated invoice.'),
+  terms: z.string().trim().max(2000).default(''),
   isDefault: z.boolean().optional().default(false),
   expectedRevision: z.number().int().min(1).optional(),
-}).strict();
+}).strict().refine(template => template.itemAreaMinHeightMm
+  - (template.headerMode === 'preprinted' ? template.topReserveMm - 34 : 0)
+  - (template.footerMode === 'preprinted' ? template.bottomReserveMm - 20 : 0) >= 24, {
+  message: 'Header and footer reserves leave too little printable item space.',
+  path: ['itemAreaMinHeightMm'],
+});
 
 export type InvoiceTemplateInput = z.infer<typeof InvoiceTemplateInputSchema>;
 

@@ -655,7 +655,7 @@ export default function People({supplier = false, id}: {supplier?: boolean; id?:
                 }
               >
                 {isLive && customerProfileLoading ? (
-                  <Empty title="Loading invoices…" text="Loading this customer’s live invoice history." />
+                  <Empty title="Loading invoices…" text="Loading this customer’s invoice history." />
                 ) : isLive && customerProfileError ? (
                   <Empty title="Could not load invoices" text={customerProfileError} action={<Btn secondary onClick={() => setRefreshIndex((n) => n + 1)}>Retry</Btn>} />
                 ) : bills.length ? (

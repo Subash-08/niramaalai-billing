@@ -104,7 +104,7 @@ export default function AccountHistory({
               <p>Invoiced value for printed products</p>
               <small>
                 {isLive
-                  ? (profile ? `${profile.contributions?.newGoodsInvoiceCount || 0} invoices` : 'Loading live totals…')
+                  ? (profile ? `${profile.contributions?.newGoodsInvoiceCount || 0} invoices` : 'Loading totals…')
                   : `${bills.filter(b => b.category !== 'Service').length} invoices`}
               </small>
             </div>
@@ -119,7 +119,7 @@ export default function AccountHistory({
               <p>Invoiced value for printing services</p>
               <small>
                 {isLive
-                  ? (profile ? `${profile.contributions?.serviceInvoiceCount || 0} invoices` : 'Loading live totals…')
+                  ? (profile ? `${profile.contributions?.serviceInvoiceCount || 0} invoices` : 'Loading totals…')
                   : `${bills.filter(b => b.category === 'Service').length} invoices`}
               </small>
             </div>

@@ -83,16 +83,25 @@ export async function nextTenantSequence(
   sequenceType: 'Purchase' | 'Receipt' | 'Payment' | 'PaymentVoucher' | 'CreditNote' | 'Return' | 'Refund' | 'Advance' | 'Quotation' | 'Invoice' | 'ServiceInvoice' | 'ServiceJob' | 'Enquiry',
   year: string,
   prefix: string,
-  session?: ClientSession
+  session?: ClientSession,
+  format?: {startNumber?: number; padding?: number; includeYear?: boolean; separator?: '-' | '/' | '_' | ''}
 ): Promise<string> {
-  const counterId = `CNT-${tenantId}-${sequenceType}-${year}`;
+  const counterYear = format?.includeYear === false ? 'ALL' : year;
+  const counterId = `CNT-${tenantId}-${sequenceType}-${counterYear}`;
+  const startNumber = Math.max(1, Math.trunc(format?.startNumber || 1));
   const res = await col<TenantCounterDocument>(db, 'tenantCounters').findOneAndUpdate(
-    {_id: counterId, tenantId, sequenceType, year},
-    {$inc: {currentValue: 1}, $set: {updatedAt: new Date()}},
+    {_id: counterId, tenantId},
+    [{$set: {
+      tenantId, sequenceType, year: counterYear,
+      currentValue: {$add: [{$ifNull: ['$currentValue', startNumber - 1]}, 1]},
+      updatedAt: new Date(),
+    }}],
     {upsert: true, returnDocument: 'after', session}
   );
-  const val = res?.currentValue || 1;
-  return `${prefix}-${year}-${String(val).padStart(4, '0')}`;
+  const val = res?.currentValue || startNumber;
+  const padding = Math.max(0, Math.min(9, Math.trunc(format?.padding ?? 4)));
+  const separator = format?.separator ?? '-';
+  return [prefix, ...(format?.includeYear === false ? [] : [year]), String(val).padStart(padding, '0')].join(separator);
 }
 
 // Cutoff and Posting Date Invariants

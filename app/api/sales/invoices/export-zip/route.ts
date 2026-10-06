@@ -233,6 +233,8 @@ export async function GET(request: Request) {
       }
 
       const fields = tmpl.fields || {};
+      const exportLines = snap.lines || inv.lines || [];
+      const isNonGst = exportLines.length > 0 && exportLines.every((line: any) => line.taxTreatment === 'NonGST');
       const accentRgb = hexToRgb(tmpl.accent || '#1e293b');
       const doc = new jsPDF({
         orientation: tmpl.orientation || 'portrait',
@@ -242,7 +244,7 @@ export async function GET(request: Request) {
       let y = 14;
 
       // Title
-      const title = tmpl.title || (snap.taxMode === 'Inter-state' || snap.igstPaise ? 'Tax Invoice' : 'Tax Invoice');
+      const title = tmpl.title || (isNonGst ? 'Non-GST Invoice' : 'Tax Invoice');
       doc.setFontSize(16);
       doc.setTextColor(accentRgb[0], accentRgb[1], accentRgb[2]);
       doc.text(title, width / 2, y, {align: 'center'});
@@ -269,7 +271,7 @@ export async function GET(request: Request) {
       const companyLines: string[] = [];
       if (fields.shopName !== false && seller.name) companyLines.push(seller.name);
       if (fields.shopAddress !== false && seller.address) companyLines.push(seller.address);
-      if (fields.shopGst !== false && seller.gst) companyLines.push(`GSTIN: ${seller.gst}`);
+      if (fields.shopGst !== false && !isNonGst && seller.gst) companyLines.push(`GSTIN: ${seller.gst}`);
       if (fields.shopPhone !== false && seller.phone) companyLines.push(`Phone: ${seller.phone}`);
       if (fields.shopEmail !== false && seller.email) companyLines.push(`Email: ${seller.email}`);
 
@@ -278,7 +280,7 @@ export async function GET(request: Request) {
       if (fields.date !== false) metaLines.push(`Date: ${snap.invoiceDate || inv.invoiceDate}`);
       if (fields.due !== false && (snap.dueDate || inv.dueDate)) metaLines.push(`Due Date: ${snap.dueDate || inv.dueDate}`);
       if (fields.reference !== false && snap.sourceReference) metaLines.push(`Ref: ${snap.sourceReference}`);
-      if (snap.placeOfSupply) metaLines.push(`Place of Supply: ${snap.placeOfSupply}`);
+      if (!isNonGst && snap.placeOfSupply) metaLines.push(`Place of Supply: ${snap.placeOfSupply}`);
 
       autoTable(doc, {
         startY: y,
@@ -300,7 +302,7 @@ export async function GET(request: Request) {
         buyerLines.push(snap.billingAddress || cust.address);
       }
       if (fields.customerPhone !== false && cust.phone) buyerLines.push(`Phone: ${cust.phone}`);
-      if (fields.customerGst !== false && cust.gst) buyerLines.push(`GSTIN: ${cust.gst}`);
+      if (fields.customerGst !== false && !isNonGst && cust.gst) buyerLines.push(`GSTIN: ${cust.gst}`);
 
       const ship = snap.shippingAddress || snap.shipTo;
       const shipLines: string[] = [];
@@ -329,8 +331,8 @@ export async function GET(request: Request) {
       y = (doc as any).lastAutoTable.finalY + 4;
 
       // Table columns & rows
-      const visibleCols = (tmpl.columns || []).filter((c: any) => c.show);
-      const lines = snap.lines || inv.lines || [];
+      const visibleCols = (tmpl.columns || []).filter((c: any) => c.show && !(isNonGst && c.id === 'tax'));
+      const lines = exportLines;
       const tableHead = visibleCols.map((c: any) => c.label);
       const tableBody = lines.map((l: any, idx: number) => {
         return visibleCols.map((colDef: any) => {
@@ -403,9 +405,9 @@ export async function GET(request: Request) {
       // Summary totals table
       const summaryRows: Array<[string, string]> = [];
       if (fields.subtotal !== false) {
-        summaryRows.push(['Taxable Subtotal', fmtPaise(snap.taxableBasePaise)]);
+        summaryRows.push([isNonGst ? 'Subtotal' : 'Taxable Subtotal', fmtPaise(snap.taxableBasePaise)]);
       }
-      if (fields.taxes !== false) {
+      if (fields.taxes !== false && !isNonGst) {
         if (snap.taxMode === 'Inter-state' || snap.igstPaise) {
           summaryRows.push(['IGST', fmtPaise(snap.igstPaise)]);
         } else {
@@ -458,8 +460,8 @@ export async function GET(request: Request) {
 
       // Watermark & Footer
       const pageCount = doc.getNumberOfPages();
-      if (isDraft || inv.status === 'Cancelled') {
-        const watermarkText = isDraft ? 'DRAFT · NOT ISSUED' : 'CANCELLED';
+      if (inv.status === 'Cancelled') {
+        const watermarkText = 'CANCELLED';
         for (let p = 1; p <= pageCount; p++) {
           doc.setPage(p);
           doc.saveGraphicsState();

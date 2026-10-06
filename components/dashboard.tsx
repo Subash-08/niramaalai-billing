@@ -64,7 +64,7 @@ export default function Dashboard() {
       setLiveData(payload);
     } catch (cause) {
       setLiveData(null);
-      setError(cause instanceof Error ? cause.message : 'Unable to connect to live billing data.');
+      setError(cause instanceof Error ? cause.message : 'Unable to connect to billing data.');
     } finally {
       setLoading(false);
     }
@@ -154,12 +154,12 @@ export default function Dashboard() {
 
     {isLive && error && <div className="dashboard-error" role="alert">
       <AlertCircle size={21}/>
-      <div><strong>Live dashboard unavailable</strong><span>{error}</span></div>
+      <div><strong>Dashboard unavailable</strong><span>{error}</span></div>
       <Btn secondary onClick={fetchLiveDashboard} disabled={loading}><RefreshCw size={15}/>{loading ? 'Retrying…' : 'Retry'}</Btn>
     </div>}
 
     {isLive && loading && !data && <div className="dashboard-loading" role="status">
-      <RefreshCw className="spin" size={25}/><strong>Loading live billing data</strong><span>Your company records are being retrieved securely.</span>
+      <RefreshCw className="spin" size={25}/><strong>Loading billing data</strong><span>Your company records are being retrieved securely.</span>
     </div>}
 
     {data && <div className="dashboard-shell">

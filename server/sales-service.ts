@@ -166,6 +166,9 @@ export type InvoiceDocument = {
   orderReference?: string | null;
   deliveryNote?: string | null;
   dispatchThrough?: string | null;
+  supplyDate?: string | null;
+  vehicleNumber?: string | null;
+  reverseCharge?: boolean;
   notes: string;
   lines: SaleLineDocument[];
   grossPaise: number;
@@ -214,8 +217,9 @@ async function buildSaleLines(
   for (let idx = 0; idx < rawLines.length; idx++) {
     const l = rawLines[idx];
     const lineId = uid('SLN');
+    const lineInclusive = l.inclusive ?? inclusive;
     const calc = validatedCalculation(() => calculateSaleLinePaise({
-      quantity: l.quantity, unitRatePaise: l.unitRatePaise, inclusive,
+      quantity: l.quantity, unitRatePaise: l.unitRatePaise, inclusive: lineInclusive,
       taxBasisPoints: l.taxBasisPoints, discountType: l.discountType, discountValue: l.discountValue,
     }));
     const tax = splitSaleTax(calc.taxPaise, taxMode);
@@ -223,7 +227,7 @@ async function buildSaleLines(
       lineId, clientLineKey: l.clientLineKey, description: l.description, details: l.details || '', unit: l.unit || 'Piece',
       printSpecifications: l.printSpecifications || {}, quantity: l.quantity,
       unitRatePaise: l.unitRatePaise, discountType: l.discountType, discountValue: l.discountValue,
-      taxBasisPoints: l.taxBasisPoints, taxTreatment: l.taxTreatment, inclusive, ...calc, ...tax,
+      taxBasisPoints: l.taxBasisPoints, taxTreatment: l.taxTreatment, inclusive: lineInclusive, ...calc, ...tax,
       returnedQuantity: 0, creditedReturnPaise: 0,
     };
     if (l.lineType === 'Product') {
@@ -392,7 +396,8 @@ export async function convertQuotationToDraft(
       inclusive: quotation.inclusive, taxMode: quotation.taxMode, placeOfSupply: quotation.placeOfSupply,
       templateId: quotation.templateId, templateRevision: quotation.templateRevision,
       sourceQuotationId: quotation._id, serviceJobId: quotation.serviceJobId, enquiryId: quotation.sourceEnquiryId,
-      orderReference: quotation.orderReference, deliveryNote: '', dispatchThrough: '', notes: quotation.notes,
+      orderReference: quotation.orderReference, deliveryNote: '', dispatchThrough: '', supplyDate: input.invoiceDate,
+      vehicleNumber: '', reverseCharge: false, notes: quotation.notes,
       lines: quotation.lines,
       grossPaise: quotation.grossPaise, discountPaise: quotation.discountPaise, taxableBasePaise: quotation.taxableBasePaise,
       taxPaise: quotation.taxPaise, cgstPaise: quotation.cgstPaise, sgstPaise: quotation.sgstPaise, igstPaise: quotation.igstPaise,
@@ -568,6 +573,7 @@ async function prepareInvoiceDraft(db: Db, identity: Identity, input: CreateInvo
     sourceQuotationId: input.sourceQuotationId, serviceJobId: input.serviceJobId,
     enquiryId: input.enquiryId, reservationId: input.reservationId,
     orderReference: input.orderReference, deliveryNote: input.deliveryNote, dispatchThrough: input.dispatchThrough,
+    supplyDate: input.supplyDate || input.invoiceDate, vehicleNumber: input.vehicleNumber, reverseCharge: input.reverseCharge,
     notes: input.notes, lines, ...totals,
     originalTotalPaise: 0, allocatedReceiptPaise: 0, allocatedCreditPaise: 0, duePaise: 0,
     createdAt: now, createdBy: identity.userId, updatedAt: now, updatedBy: identity.userId,
@@ -698,17 +704,31 @@ export async function issueInvoice(db: Db, identity: Identity, rawInput: IssueIn
       // No product stock posting. Quantity is used only for invoice calculation.
     }
     const year = deriveFinancialYear(draft.invoiceDate);
-    const invoiceNumber = await nextTenantSequence(db, tenantId,
-      draft.invoiceKind === 'Service' ? 'ServiceInvoice' : 'Invoice', year,
-      draft.invoiceKind === 'Service' ? 'SRV' : 'INV', session);
+    const prefix = draft.invoiceKind === 'Service' ? (seller.serviceInvoicePrefix || 'SRV') : (seller.invoicePrefix || 'INV');
+    const sequenceType = draft.invoiceKind === 'Service' ? 'ServiceInvoice' : 'Invoice';
+    const sequenceFormat = {
+      startNumber: seller.invoiceStartNumber || 1,
+      padding: seller.invoiceNumberPadding ?? 4,
+      includeYear: seller.invoiceIncludeFinancialYear !== false,
+      separator: seller.invoiceNumberSeparator ?? '-' as '-' | '/' | '_' | '',
+    };
+    let invoiceNumber = '';
+    for (let attempt = 0; attempt < 1000; attempt += 1) {
+      invoiceNumber = await nextTenantSequence(db, tenantId, sequenceType, year, prefix, session, sequenceFormat);
+      const duplicateNumber = await col(db, 'invoices').findOne({tenantId, invoiceNumber}, {session, projection: {_id: 1}});
+      if (!duplicateNumber) break;
+      invoiceNumber = '';
+    }
+    if (!invoiceNumber) throw new AppError(409, 'Could not find an unused invoice number after 1,000 attempts. Move the starting number forward in Company settings.');
     const settlement = await settleInvoiceOnIssue(db, identity, session, {...draft, totalPaise: totals.totalPaise, invoiceNumber}, input);
-    const sellerSnapshot = Object.fromEntries(['name','phone','email','address','gst','state','stateCode','postalCode','bank','account','ifsc','declaration','logoFileId'].map(key => [key, seller[key] ?? '']));
+    const sellerSnapshot = Object.fromEntries(['name','phone','alternatePhone','email','address','gst','state','stateCode','postalCode','bank','bankBranch','account','ifsc','declaration','logoFileId','invoiceHeaderSubtitle','invoiceNumberLabel'].map(key => [key, seller[key] ?? '']));
     const issuedSnapshot = {schemaVersion: 1, invoiceNumber, invoiceDate: draft.invoiceDate, dueDate: draft.dueDate,
       seller: sellerSnapshot, customer: draft.customerSnapshot, billTo: draft.billTo, shipTo: draft.shipTo,
       invoiceKind: draft.invoiceKind, businessCategory: draft.businessCategory,
       inclusive: draft.inclusive, taxMode: draft.taxMode, placeOfSupply: draft.placeOfSupply,
       templateId: draft.templateId, templateRevision: draft.templateRevision, template: template.snapshot,
       orderReference: draft.orderReference, deliveryNote: draft.deliveryNote, dispatchThrough: draft.dispatchThrough,
+      supplyDate: draft.supplyDate || draft.invoiceDate, vehicleNumber: draft.vehicleNumber, reverseCharge: !!draft.reverseCharge,
       notes: draft.notes, lines, ...totals};
     const updated = await col<InvoiceDocument>(db, 'invoices').updateOne({_id: draft._id, tenantId, status: 'Draft', version: input.expectedVersion},
       {$set: {status: 'Issued', invoiceNumber, financialYear: deriveFinancialYear(draft.invoiceDate), issuedAt: now,

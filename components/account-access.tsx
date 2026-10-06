@@ -30,11 +30,11 @@ export default function AccountAccess() {
       <div className="notice">
         {isLive ? (
           <span>
-            Connected to live company account: <b>{companySession?.company?.name}</b> ({companySession?.user?.email}).
+            Connected to company account: <b>{companySession?.company?.name}</b> ({companySession?.user?.email}).
           </span>
         ) : (
           <span>
-            Sign in to load and update your company’s live billing data.
+            Sign in to load and update your company’s billing data.
           </span>
         )}
       </div>

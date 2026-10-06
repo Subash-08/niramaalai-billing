@@ -2,11 +2,160 @@
 import {amountWords} from '@/lib/amount-words';
 import {useRef, useState} from 'react';
 import Link from 'next/link';
-import {Copy, Pencil, Printer, ArrowUp, ArrowDown, Check, FileText, Plus} from 'lucide-react';
+import {Copy, Pencil, Printer, ArrowUp, ArrowDown, Check, FileText, Plus, Phone, Mail, MapPin} from 'lucide-react';
 import {InvoiceTemplate, templateFields, extensionSeed} from '@/lib/extensions';
 import {Bill, uid, money, totals, lineTotal, dateLabel, paid, balance} from '@/lib/domain';
 import {useStore} from './store';
 import {PageHead, Card, Btn, Modal, Field, Badge} from './ui';
+
+const invoiceDate = (value?: string) => {
+  if (!value) return '—';
+  const [year, month, day] = value.split('-');
+  return year && month && day ? `${day}/${month}/${year}` : value;
+};
+
+function ReferenceInvoice({bill, template, state, supplier, isLive}: {bill: Bill; template: InvoiceTemplate; state: any; supplier?: {name:string;address:string;phone:string;gst:string}; isLive:boolean}) {
+  const f = template.fields || {};
+  const seller = bill.shopSnapshot || state.settings;
+  const customer = supplier || bill.customerSnapshot || state.customers.find((entry: any) => entry.id === bill.customerId) || {};
+  const billTo: any = supplier ? customer : bill.billTo || customer;
+  const shipTo: any = bill.shipTo || billTo;
+  const sum = totals(bill);
+  const isNonGst = bill.lines.length > 0 && bill.lines.every((line) => line.taxTreatment === 'NonGST');
+  const grandTotal = typeof bill.total === 'number' ? bill.total : sum.total + (bill.roundOff || 0);
+  const interstate = bill.taxMode === 'Inter-state';
+  const visibleColumns = (template.columns || []).filter(column => column.show && !(isNonGst && column.id === 'tax'));
+  const packingLines = bill.lines.filter(line => line.lineType === 'Charge' && /^(packing(?:\s*&\s*forwarding)?|forwarding|freight)$/i.test(line.name.trim()));
+  const packingTotal = packingLines.reduce((value, line) => value + lineTotal(line, bill.inclusive, bill.taxMode).base, 0);
+  const itemLines = f.packing ? bill.lines.filter(line => !packingLines.includes(line)) : bill.lines;
+  const publicNumber = (bill as any).invoiceNumber || (bill as any).quotationNumber || bill.id;
+  const automaticTitle = bill.kind === 'Quotation' ? 'QUOTATION' : isNonGst ? 'NON-GST INVOICE' : bill.kind === 'Service' ? (sum.tax > 0 ? 'SERVICE TAX INVOICE' : 'SERVICE INVOICE') : sum.tax > 0 ? 'TAX INVOICE' : 'CASH BILL';
+  const title = template.title || automaticTitle;
+  const headerReserve = template.headerMode === 'hidden' ? 0 : template.topReserveMm;
+  const footerReserve = template.footerMode === 'hidden' ? 0 : template.bottomReserveMm;
+  const calibratedItemHeight = Math.max(24, template.itemAreaMinHeightMm
+    - (template.headerMode === 'preprinted' ? headerReserve - 34 : 0)
+    - (template.footerMode === 'preprinted' ? footerReserve - 20 : 0));
+  const style = {
+    '--invoice-font': `${template.fontSize}px`, '--invoice-heading-font': `${template.headingFontSize}px`,
+    '--invoice-font-family': template.fontFamily, '--invoice-font-weight': template.fontWeight,
+    '--invoice-text': template.textColor, '--invoice-line': template.lineColor,
+    '--invoice-line-width': `${template.lineWidth}px`, '--invoice-accent': template.accent,
+    '--invoice-title-bg': template.titleBackground, '--invoice-title-color': template.titleColor,
+    '--invoice-page-margin': `${template.pageMarginMm}mm`, '--invoice-item-height': `${calibratedItemHeight}mm`,
+    '--invoice-top-reserve': `${headerReserve}mm`,
+  } as React.CSSProperties;
+
+  const partyLines = (party: any, includeGst: boolean) => [
+    f.customerName && party?.name,
+    f.customerAddress && party?.address,
+    f.customerPhone && party?.phone && `Phone: ${party.phone}`,
+    includeGst && customer?.gst && `GSTIN: ${customer.gst}`,
+    [party?.state, party?.postalCode].filter(Boolean).join(' - '),
+  ].filter(Boolean);
+
+  const cell = (line: Bill['lines'][number], id: string, index: number) => {
+    const calculated = lineTotal(line, bill.inclusive, bill.taxMode);
+    const rateExclusive = bill.inclusive ? line.rate / (1 + line.tax / 100) : line.rate;
+    const gross = rateExclusive * line.qty;
+    const discountAmount = Math.max(0, gross - calculated.base);
+    if (id === 'index') return index + 1;
+    if (id === 'description') return <><b>{line.name}</b>{line.details && <small>{line.details}</small>}{line.printSpecifications && Object.entries(line.printSpecifications).filter(([, value]) => value).length > 0 && <small>{Object.entries(line.printSpecifications).filter(([, value]) => value).map(([key, value]) => `${key.replace(/([A-Z])/g, ' $1')}: ${value}`).join(' · ')}</small>}{f.warranty && line.warranty > 0 && <small>Warranty: {line.warranty} month(s)</small>}</>;
+    if (id === 'hsn') return line.hsn || line.sac || '';
+    if (id === 'qty') return line.qty;
+    if (id === 'unit') return line.unit || 'Piece';
+    if (id === 'rateExcl') return money(rateExclusive);
+    if (id === 'rateIncl') return money(bill.inclusive ? line.rate : line.rate * (1 + line.tax / 100));
+    if (id === 'gross') return money(gross);
+    if (id === 'discount') return discountAmount ? money(discountAmount) : '0.00';
+    if (id === 'tax') return line.taxTreatment === 'Taxable' || !line.taxTreatment ? `${line.tax}%` : line.taxTreatment;
+    if (id === 'amount') return money(calculated.base);
+    if (id === 'warranty') return line.warranty ? `${line.warranty} months` : '—';
+    return '';
+  };
+
+  const rowCapacity = Math.max(1, Math.floor(Math.max(8, calibratedItemHeight - 12) / 8.5));
+  const pageLines: Array<Array<{line: Bill['lines'][number]; index: number}>> = [];
+  let currentPage: Array<{line: Bill['lines'][number]; index: number}> = [];
+  let usedCapacity = 0;
+  itemLines.forEach((line, index) => {
+    const specifications = line.printSpecifications ? Object.values(line.printSpecifications).filter(Boolean).join(' ') : '';
+    const descriptionLength = [line.name, line.details, specifications].filter(Boolean).join(' ').length;
+    const rowWeight = Math.max(1, Math.ceil(descriptionLength / 70));
+    if (currentPage.length && usedCapacity + rowWeight > rowCapacity) {
+      pageLines.push(currentPage);
+      currentPage = [];
+      usedCapacity = 0;
+    }
+    currentPage.push({line, index});
+    usedCapacity += Math.min(rowWeight, rowCapacity);
+  });
+  if (currentPage.length || pageLines.length === 0) pageLines.push(currentPage);
+
+  return <div className="print-area reference-document">
+    {pageLines.map((lines, pageIndex) => {
+      const isLastPage = pageIndex === pageLines.length - 1;
+      return <article key={pageIndex} className={`invoice-paper reference-invoice ${template.headerMode === 'preprinted' ? 'preprinted-header' : ''} ${bill.status === 'Cancelled' ? 'draft-document' : ''} ${template.borders ? '' : 'no-borders'} ${template.striped ? 'striped' : ''}`} style={style}>
+      {bill.status === 'Cancelled' && <div className="invoice-draft-watermark">CANCELLED</div>}
+      {template.headerMode === 'preprinted' && <div className="letterhead-reserve" style={{height: `${headerReserve}mm`}} aria-label="Reserved for preprinted letterhead" />}
+      {template.headerMode === 'digital' && <header className="reference-letterhead" style={{minHeight: `${Math.max(18, headerReserve)}mm`}}>
+        <div>{f.shopName && <strong>{seller.name || 'Billing Software'}</strong>}<span>{seller.invoiceHeaderSubtitle || (/niramaalai/i.test(seller.name || '') ? 'ACCHU KALAIKOODAM' : 'PRINT · DESIGN · BRANDING')}</span></div>
+        <i aria-hidden="true" />
+      </header>}
+      <div className="reference-title"><span>{title}</span>{pageLines.length > 1 && <small>Page {pageIndex + 1} of {pageLines.length}</small>}</div>
+      {f.shopGst && !isNonGst && <div className="reference-seller-gst">GSTIN: {seller.gst || '—'}</div>}
+      <div className="reference-body">
+        <section className="reference-meta-grid">
+          <div><b>{seller.invoiceNumberLabel || 'Invoice No'}</b><span>{f.number ? publicNumber : ''}</span></div><div><b>Transport Mode</b><span>{f.transportMode ? bill.dispatch || '—' : ''}</span></div>
+          <div><b>Invoice Date</b><span>{f.date ? invoiceDate(bill.date) : ''}</span></div><div><b>Vehicle Number</b><span>{f.vehicleNumber ? bill.vehicleNumber || '—' : ''}</span></div>
+          {!isNonGst && <><div><b>Reverse Charge</b><span>{f.reverseCharge ? bill.reverseCharge ? 'Yes' : 'No' : ''}</span></div><div><b>Date of Supply</b><span>{f.supplyDate ? invoiceDate(bill.supplyDate || bill.date) : ''}</span></div></>}
+          <div><b>State</b><span className="reference-state-value">{f.stateDetails && <><span>{seller.state || '—'}</span>{seller.stateCode && !isNonGst && <><strong>State Code</strong><span>{seller.stateCode}</span></>}</>}</span></div>
+          {!isNonGst ? <div><b>Place of Supply</b><span>{f.destination ? bill.placeOfSupply || '—' : ''}</span></div> : <div />}
+        </section>
+        <section className="reference-parties">
+          <div><h3>BILL TO PARTY</h3>{partyLines(billTo, !!f.customerGst && !isNonGst).map((line, index) => <p key={index} className={index === 0 ? 'party-name' : ''}>{line}</p>)}</div>
+          <div><h3>SHIP TO PARTY</h3>{f.shipping ? partyLines(shipTo, false).map((line, index) => <p key={index} className={index === 0 ? 'party-name' : ''}>{line}</p>) : <p>Same as bill to</p>}</div>
+        </section>
+        <section className="reference-items-wrap" style={{minHeight: `${calibratedItemHeight}mm`}}>
+          <table className="reference-items"><colgroup>{visibleColumns.map(column => <col key={column.id} style={column.width ? {width: `${column.width}%`} : undefined} />)}</colgroup><thead><tr>{visibleColumns.map(column => <th key={column.id} style={{textAlign: column.align}}>{column.label}</th>)}</tr></thead>
+            <tbody>{lines.map(({line, index}) => <tr key={line.clientLineKey || index}>{visibleColumns.map(column => <td key={column.id} style={{textAlign: column.align}}>{cell(line, column.id, index)}</td>)}</tr>)}
+            {lines.length < rowCapacity && <tr className="reference-empty-row">{visibleColumns.map(column => <td key={column.id}>&nbsp;</td>)}</tr>}</tbody>
+          </table>
+        </section>
+        {!isLastPage && <div className="reference-continued">Continued on page {pageIndex + 2}</div>}
+        {isLastPage && <><section className="reference-settlement">
+          <div className="reference-settlement-left">
+            {f.bank && <div className="reference-bank"><p><b>Bank</b><span>{seller.bank || '—'}</span></p><p><b>Name</b><span>{seller.name || '—'}</span></p><p><b>A/C No.</b><span>{seller.account || '—'}</span></p><p><b>Branch</b><span>{seller.bankBranch || '—'}</span></p><p><b>IFSC Code</b><span>{seller.ifsc || '—'}</span></p></div>}
+            {f.amountWords && <div className="reference-words"><b>E.&amp;<br/>O.E</b><span>{amountWords(grandTotal)}</span></div>}
+          </div>
+          <div className="reference-totals">
+            {f.packing && <p><span>Packing &amp; forwarding</span><b>{packingTotal ? money(packingTotal) : ''}</b></p>}
+            {f.subtotal && <p className="emphasis"><span>TOTAL</span><b>{money(sum.base)}</b></p>}
+            {f.taxes && !isNonGst && (interstate ? <p><span>Add: IGST</span><b>{money(sum.igst)}</b></p> : <><p><span>Add: CGST</span><b>{money(sum.cgst)}</b></p><p><span>Add: SGST</span><b>{money(sum.sgst)}</b></p></>)}
+            {f.roundOff && Math.abs(grandTotal - sum.total) >= 0.005 && <p><span>Round off</span><b>{money(grandTotal - sum.total)}</b></p>}
+            {f.taxes && !isNonGst && <p><span>Total Tax Amount</span><b>{money(sum.tax)}</b></p>}
+            {f.grandTotal && <p className="grand"><span>GRAND TOTAL</span><b>{money(grandTotal)}</b></p>}
+          </div>
+        </section>
+        {f.payments && bill.kind !== 'Quotation' && bill.status !== 'Draft' && !supplier && <div className="reference-payment"><span>Amount received: {money(bill.previewPaid ?? bill.paid ?? paid(state, bill.id))}</span><b>Balance: {money(bill.previewPaid !== undefined ? Math.max(0, grandTotal - bill.previewPaid) : bill.dueAmount ?? balance(state, bill))}</b></div>}
+        <section className="reference-signatures">
+          <div>{f.declaration && <><u>Terms of Conditions:</u><div className="reference-terms">{(template.terms || seller.declaration || '').split(/\r?\n/).filter(Boolean).map((term: string, index: number) => <p key={index}>{index + 1}. {term.replace(/^\d+[.)]\s*/, '')}</p>)}</div></>}</div>
+          <div className="signature-label">{f.receiverSignature && <>Receiver&apos;s Signature with seal</>}</div>
+          <div className="signature-label">{f.signatures && <><b>For {seller.name}</b><span>Authorised Signature</span></>}</div>
+        </section>
+        {f.notes && bill.notes && <div className="reference-notes"><b>Notes:</b> {bill.notes}</div>}</>}
+      </div>
+      {template.footerMode === 'digital' && <footer className="reference-contact-footer" style={{minHeight: `${Math.max(14, footerReserve)}mm`}}>
+        {f.shopPhone && <div className="contact-footer-item phone"><i aria-hidden="true"><Phone /></i><span>{[seller.phone, seller.alternatePhone].filter(Boolean).map((phone: string) => <span key={phone}>{phone}</span>)}</span></div>}
+        {f.shopEmail && <div className="contact-footer-item email"><i aria-hidden="true"><Mail /></i><span>{seller.email || '—'}</span></div>}
+        {f.shopAddress && <div className="contact-footer-item address"><i aria-hidden="true"><MapPin /></i><span>{seller.address || '—'}</span></div>}
+      </footer>}
+      {template.footerMode === 'preprinted' && <div className="letterhead-reserve footer" style={{height: `${footerReserve}mm`}} aria-label="Reserved for preprinted footer" />}
+      {!isLive && <p className="invoice-foot">DEMO - not a valid tax invoice</p>}
+    </article>;
+    })}
+  </div>;
+}
 
 export function TemplateInvoice({
   bill,
@@ -20,308 +169,17 @@ export function TemplateInvoice({
   template?: InvoiceTemplate;
 }) {
   const {state, isLive} = useStore();
-  const t =
+  const selectedTemplate =
     template ||
     (!templateId ? (bill as Bill & {templateSnapshot?: InvoiceTemplate}).templateSnapshot : undefined) ||
     state.templates.find((t) => t.id === (templateId || bill.templateId || state.defaultTemplateId)) ||
     state.templates[0];
-  if (!t) return <div className="notice">Select a saved invoice template to preview this document.</div>;
-  const f = t.fields;
-  const s = bill.shopSnapshot || state.settings;
-  const c = supplier || bill.customerSnapshot || state.customers.find((c) => c.id === bill.customerId);
-  const billTo = supplier ? undefined : bill.billTo || c;
-  const deliveryTo = bill.shipTo || billTo;
-  const interstate = bill.taxMode === 'Inter-state';
-  const sum = totals(bill),
-    cols = (t.columns || []).filter((c: any) => c.show);
-  const details = 'details' in (c || {}) ? (c as {details?: Record<string, string>}).details : undefined;
-  const hsn = Object.values(
-    bill.lines.reduce<
-      Record<string, {code: string; base: number; tax: number; rate: number; cgst: number; sgst: number; igst: number; treatment?: string}>
-    >((a, l) => {
-      const treatment = l.taxTreatment || 'Taxable';
-      const k = treatment + '-' + l.hsn + '-' + l.tax;
-      const x = lineTotal(l, bill.inclusive, bill.taxMode);
-      a[k] ??= {code: l.hsn, base: 0, tax: 0, rate: (treatment === 'Exempt' || treatment === 'NonGST') ? 0 : l.tax, cgst: 0, sgst: 0, igst: 0, treatment};
-      a[k].base += x.base;
-      a[k].tax += x.tax;
-      a[k].cgst += x.cgst;
-      a[k].sgst += x.sgst;
-      a[k].igst += x.igst;
-      return a;
-    }, {})
-  );
-
-  return (
-    <div className="print-area">
-      <article
-        className={`invoice-paper template-paper ${bill.status === 'Draft' || bill.status === 'Cancelled' ? 'draft-document' : ''} ${t.borders ? '' : 'no-borders'} ${t.striped ? 'striped' : ''} ${
-          t.orientation
-        }`}
-        style={{'--invoice-accent': t.accent, '--invoice-font': t.fontSize + 'px'} as React.CSSProperties}
-      >
-        {(bill.status === 'Draft' || bill.status === 'Cancelled') && <div className="invoice-draft-watermark">{bill.status === 'Draft' ? 'DRAFT · NOT ISSUED' : 'CANCELLED'}</div>}
-        <div className="invoice-top">
-          <h2>
-            {supplier
-              ? 'Purchase record'
-              : t.title ||
-                (bill.kind === 'Quotation'
-                  ? 'Quotation'
-                  : bill.kind === 'Service'
-                  ? 'Service Invoice'
-                  : sum.tax > 0
-                  ? 'Tax Invoice'
-                  : 'Sales Invoice')}
-          </h2>
-          <span>ORIGINAL FOR RECIPIENT</span>
-        </div>
-        <div className="invoice-box">
-          <div className="invoice-parties">
-            <div className="invoice-party-column">
-              <div
-                className="invoice-shop"
-                style={{
-                  justifyContent:
-                    t.logoPosition === 'center' ? 'center' : t.logoPosition === 'right' ? 'flex-end' : 'flex-start',
-                }}
-              >
-                {f.logo && s.logo && <img src={s.logo} alt="Shop logo" />}
-                {f.shopName && <strong>{s.name.toUpperCase()}</strong>}
-              </div>
-              {f.shopAddress && <p>{s.address}</p>}
-              {f.shopGst && <p>GSTIN/UIN: {s.gst}</p>}
-              {(s.state || s.stateCode || s.postalCode) && (
-                <p>State: {s.state || '—'}{s.stateCode ? `, Code: ${s.stateCode}` : ''}{s.postalCode ? ` · PIN: ${s.postalCode}` : ''}</p>
-              )}
-              {f.shopPhone && <p>Contact: {s.phone}</p>}
-              {f.shopEmail && <p>Email: {s.email}</p>}
-              <div className="invoice-buyer">
-                <small>{supplier ? 'Supplier' : 'Buyer (Bill to)'}</small>
-                {f.customerName && <strong>{billTo?.name || 'Customer not selected'}</strong>}
-                {f.customerAddress && <p>{billTo?.address}</p>}
-                {f.customerPhone && <p>{billTo?.phone}</p>}
-                {f.customerGst && <p>GSTIN/UIN: {c?.gst || 'Not provided'}</p>}
-                {billTo && (billTo as any).state && <p>{(billTo as any).state}{(billTo as any).stateCode ? `, Code: ${(billTo as any).stateCode}` : ''}{(billTo as any).postalCode ? ` · PIN: ${(billTo as any).postalCode}` : ''}</p>}
-                {f.shipping && (
-                  <div className="invoice-shipto">
-                    <strong>Ship to (Deliver to)</strong>
-                    <p>{bill.shipTo?.name || billTo?.name}</p>
-                    <p>{bill.shipTo?.address || billTo?.address}</p>
-                    <p>{bill.shipTo?.phone || billTo?.phone}</p>
-                    {deliveryTo && <p>{(deliveryTo as any).state || ''} {(deliveryTo as any).postalCode || ''}</p>}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="invoice-meta">
-              {Object.entries({
-                number: ['Document No.', bill.id],
-                date: ['Date', dateLabel(bill.date)],
-                due: [bill.kind === 'Quotation' ? 'Valid until' : 'Due date', dateLabel(bill.due)],
-                reference: ['Reference', bill.jobId || bill.sourceId || '—'],
-                order: ['Buyer order no.', bill.orderRef || '—'],
-                delivery: ['Delivery note', bill.deliveryNote || '—'],
-                dispatch: ['Dispatched through', bill.dispatch || '—'],
-                destination: ['Place of supply', bill.placeOfSupply || 'Tamil Nadu'],
-              })
-                .filter(([k]) => f[k])
-                .map(([k, [label, value]]) => (
-                  <div key={k}>
-                    <small>{label}</small>
-                    <b>{value}</b>
-                  </div>
-                ))}
-            </div>
-          </div>
-          <table className="invoice-items">
-            <thead>
-              <tr>
-                {(cols as any[]).map((col: any) => (
-                  <th key={col.id} style={{textAlign: col.align}}>
-                    {col.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {bill.lines.map((l, i) => {
-                const calc = lineTotal(l, bill.inclusive, bill.taxMode);
-                const p = state.products.find((p) => p.id === l.productId);
-                const cells: Record<string, React.ReactNode> = {
-                  index: i + 1,
-                  description: (
-                    <>
-                      <b>{l.name}</b>
-                      {l.details && <small>{l.details}</small>}
-                      {l.printSpecifications && Object.entries(l.printSpecifications).filter(([,value])=>value).length > 0 && (
-                        <small>{Object.entries(l.printSpecifications).filter(([,value])=>value).map(([key,value])=>`${key.replace(/([A-Z])/g,' $1')}: ${value}`).join(' · ')}</small>
-                      )}
-                      {f.model && p && <small>{p.model}</small>}
-                      {f.serials && l.serials.map((n) => <small key={n}>S/N: {n}</small>)}
-                      {f.warranty && l.warranty > 0 && <small>Warranty: {l.warranty} month(s)</small>}
-                    </>
-                  ),
-                  hsn: l.hsn,
-                  tax: l.taxTreatment === 'Exempt' ? 'Exempt' : l.taxTreatment === 'NonGST' ? 'Non-GST' : l.tax + '%',
-                  qty: l.qty + ' ' + (l.unit || 'Piece'),
-                  rateIncl: money(bill.inclusive ? l.rate : l.rate * (1 + l.tax / 100)),
-                  rateExcl: money(bill.inclusive ? l.rate / (1 + l.tax / 100) : l.rate),
-                  discount: l.discountType === 'Amount' ? money(l.discount) : l.discount + '%',
-                  warranty: l.warranty ? l.warranty + ' months' : '—',
-                  amount: money(calc.base),
-                };
-                return (
-                  <tr key={i} className="invoice-line-row">
-                    {(cols as any[]).map((col: any) => (
-                      <td key={col.id} style={{textAlign: col.align}}>
-                        {cells[col.id]}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-              {Array.from({length: Math.max(0, 10 - bill.lines.length)}, (_, index) => (
-                <tr className="invoice-items-spacer" aria-hidden="true" key={`empty-${index}`}>
-                  {(cols as any[]).map((col: any) => <td key={col.id}>&nbsp;</td>)}
-                </tr>
-              ))}
-              {f.subtotal && (
-                <tr className="invoice-tax-row">
-                  <td colSpan={Math.max(1, cols.length - 1)}>Taxable value</td>
-                  {cols.length > 1 && <td>{money(sum.base)}</td>}
-                </tr>
-              )}
-              {f.taxes &&
-                (interstate ? (
-                  <tr>
-                    <td colSpan={Math.max(1, cols.length - 1)}>IGST Output</td>
-                    {cols.length > 1 && <td>{money(sum.igst)}</td>}
-                  </tr>
-                ) : (
-                  <>
-                    <tr>
-                      <td colSpan={Math.max(1, cols.length - 1)}>CGST Output</td>
-                      {cols.length > 1 && <td>{money(sum.cgst)}</td>}
-                    </tr>
-                    <tr>
-                      <td colSpan={Math.max(1, cols.length - 1)}>SGST Output</td>
-                      {cols.length > 1 && <td>{money(sum.sgst)}</td>}
-                    </tr>
-                  </>
-                ))}
-              {f.grandTotal && (
-                <tr className="invoice-total">
-                  <td colSpan={Math.max(1, cols.length - 1)}>
-                    Total · {bill.lines.filter((l) => l.lineType !== 'Charge').reduce((a, l) => a + l.qty, 0)} Nos
-                  </td>
-                  {cols.length > 1 && <td>{money(sum.total)}</td>}
-                </tr>
-              )}
-            </tbody>
-          </table>
-          {f.amountWords && (
-            <div className="invoice-words">
-              <small>Amount chargeable in words</small>
-              <strong>INR {amountWords(sum.total)}</strong>
-            </div>
-          )}
-          {f.payments && bill.kind !== 'Quotation' && bill.status !== 'Draft' && !supplier && (
-            <div className="invoice-payment">
-              <span>Amount received: {money(bill.previewPaid ?? bill.paid ?? paid(state, bill.id))}</span>
-              <b>
-                Invoice balance: {money(bill.previewPaid !== undefined ? Math.max(0, sum.total - bill.previewPaid) : bill.dueAmount ?? balance(state, bill))}
-              </b>
-            </div>
-          )}
-          {f.taxSummary && (
-            <table className="invoice-tax-table">
-              <thead>
-                <tr>
-                  <th>HSN / SAC</th>
-                  <th>Taxable value</th>
-                  {interstate ? (
-                    <>
-                      <th>IGST rate</th>
-                      <th>IGST amount</th>
-                    </>
-                  ) : (
-                    <>
-                      <th>CGST rate</th>
-                      <th>Amount</th>
-                      <th>SGST rate</th>
-                      <th>Amount</th>
-                    </>
-                  )}
-                  <th>Total tax</th>
-                </tr>
-              </thead>
-              <tbody>
-                {hsn.map((x, i) => (
-                  <tr key={i}>
-                    <td>{x.code}</td>
-                    <td>{money(x.base)}</td>
-                    {interstate ? (
-                      <>
-                        <td>{x.rate}%</td>
-                        <td>{money(x.igst)}</td>
-                      </>
-                    ) : (
-                      <>
-                        <td>{x.rate / 2}%</td>
-                        <td>{money(x.cgst)}</td>
-                        <td>{x.rate / 2}%</td>
-                        <td>{money(x.sgst)}</td>
-                      </>
-                    )}
-                    <td>{money(x.tax)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <div className="invoice-bottom">
-            <div>
-              {f.declaration && (
-                <>
-                  <strong>Declaration</strong>
-                  <p>{s.declaration}</p>
-                </>
-              )}
-              {f.notes && bill.notes && (
-                <>
-                  <strong>Notes and terms</strong>
-                  <p>{bill.notes}</p>
-                </>
-              )}
-            </div>
-            {f.bank && (
-              <div>
-                <strong>Company’s bank details</strong>
-                <p>A/c holder: {s.name}</p>
-                <p>Bank: {s.bank}</p>
-                <p>A/c: {s.account}</p>
-                <p>Branch & IFSC: {s.ifsc}</p>
-              </div>
-            )}
-          </div>
-          {f.signatures && (
-            <div className="invoice-sign">
-              <span>Customer’s seal and signature</span>
-              <div>
-                For {s.name}
-                <br />
-                <br />
-                Authorised signatory
-              </div>
-            </div>
-          )}
-        </div>
-        {f.footer && <p className="invoice-foot">{t.footer}</p>}
-        {!isLive && <p className="invoice-foot">DEMO — not a valid tax invoice</p>}
-      </article>
-    </div>
-  );
+  if (!selectedTemplate) return <div className="notice">Select a saved invoice template to preview this document.</div>;
+  const templateDefaults = extensionSeed.templates[0];
+  const selectedColumns = (selectedTemplate.columns || []).some((column: any) => column.id === 'unit') && (selectedTemplate.columns || []).some((column: any) => column.id === 'gross')
+    ? selectedTemplate.columns : templateDefaults.columns;
+  const t: InvoiceTemplate = {...templateDefaults, ...selectedTemplate, fields: {...templateDefaults.fields, ...(selectedTemplate.fields || {})}, columns: selectedColumns};
+  return <ReferenceInvoice bill={bill} template={t} state={state} supplier={supplier} isLive={isLive} />;
 }
 
 export function PrintDialog({bills, onClose}: {bills: Bill[]; onClose: () => void}) {
@@ -339,7 +197,7 @@ export function PrintDialog({bills, onClose}: {bills: Bill[]; onClose: () => voi
       if (!template) throw new Error('Select an active print template.');
       const entries = bills.map((bill) => {
         const wrapper = previewRefs.current.get(bill.id);
-        const element = wrapper?.querySelector<HTMLElement>('.invoice-paper');
+        const element = wrapper?.querySelector<HTMLElement>('.reference-document') || wrapper?.querySelector<HTMLElement>('.invoice-paper');
         if (!element) throw new Error(`Preview for ${bill.id} is not ready. Wait for it to appear and try again.`);
         const billTemplate = userOverrode ? template : ((bill as any).templateSnapshot || state.templates.find((t) => t.id === (bill.templateId || state.defaultTemplateId)) || template);
         const rawNum = (bill as any).invoiceNumber || (bill as any).quotationNumber || bill.id;
@@ -417,7 +275,7 @@ export function PrintDialog({bills, onClose}: {bills: Bill[]; onClose: () => voi
         <Btn
           onClick={() => {
             const style = document.createElement('style');
-            style.textContent = `@media print { @page { size: ${template.paper} ${template.orientation}; margin: 12mm; } }`;
+            style.textContent = `@media print { @page { size: ${template.paper} ${template.orientation}; margin: 0; } }`;
             document.head.appendChild(style);
             window.print();
             style.remove();
@@ -437,7 +295,6 @@ export default function Templates() {
     setState,
     notify,
     isLive,
-    updateLogoApi,
     saveTemplateApi,
     setDefaultTemplateApi,
     archiveTemplateApi,
@@ -448,7 +305,6 @@ export default function Templates() {
   const [sampleId, setSampleId] = useState(state.bills[0]?.id || '');
   const [print, setPrint] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [logoBusy, setLogoBusy] = useState(false);
 
   const previewOnlySample: Bill = {
     id: 'PREVIEW-INV-0001', customerId: 'PREVIEW-CUSTOMER', date: '2026-09-18', due: '2026-09-18',
@@ -475,6 +331,18 @@ export default function Templates() {
     }
     if (editing.columns.filter((c) => c.show).length < 2) {
       notify('Keep at least two item columns visible.');
+      return;
+    }
+    const visibleColumns = editing.columns.filter((column) => column.show);
+    if (visibleColumns.every(column => column.width != null) && Math.abs(visibleColumns.reduce((sum, column) => sum + (column.width || 0), 0) - 100) > 1) {
+      notify('Visible column widths must total 100%.');
+      return;
+    }
+    const usableItemHeight = editing.itemAreaMinHeightMm
+      - (editing.headerMode === 'preprinted' ? editing.topReserveMm - 34 : 0)
+      - (editing.footerMode === 'preprinted' ? editing.bottomReserveMm - 20 : 0);
+    if (usableItemHeight < 24) {
+      notify('Header and footer reserves leave too little printable item space. Reduce a reserve or increase the item area height.');
       return;
     }
     setSaving(true);
@@ -562,53 +430,15 @@ export default function Templates() {
           <div className="stack">
             <Card title="Template settings">
               <div className="form-body stack">
-                <Field label="Company logo (shared by new invoices)">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={logoBusy || saving}
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      setLogoBusy(true);
-                      await updateLogoApi(file);
-                      setLogoBusy(false);
-                      e.target.value = '';
-                    }}
-                  />
-                </Field>
-                {logoBusy && <p className="muted" style={{fontSize: '0.85rem'}}>Saving logo to company settings…</p>}
-                {state.settings.logo && (
-                  <>
-                    <img
-                      src={state.settings.logo}
-                      alt="Company logo"
-                      style={{maxWidth: 120, maxHeight: 80, objectFit: 'contain'}}
-                    />
-                    <Btn
-                      secondary
-                      disabled={logoBusy || saving}
-                      onClick={async () => {
-                        setLogoBusy(true);
-                        await updateLogoApi(null);
-                        setLogoBusy(false);
-                      }}
-                    >
-                      Remove logo
-                    </Btn>
-                  </>
-                )}
-                <p className="muted">
-                  Logo position and visibility are set below. Issued invoices retain their original company details.
-                </p>
                 <Field label="Template name">
                   <input value={editing.name} onChange={(e) => setEditing({...editing, name: e.target.value})} />
                 </Field>
-                <Field
-                  label="Printed title override"
-                  hint="Leave blank to use Tax Invoice, Sales Invoice, Service Invoice or Quotation."
-                >
-                  <input value={editing.title} onChange={(e) => setEditing({...editing, title: e.target.value})} />
+                <Field label="Printed document title" hint="Automatic chooses Tax Invoice, Non-GST Invoice, Cash Bill, Service Invoice or Quotation from the document. Select a title here only when this template must always use that title.">
+                  <select value={editing.title} onChange={(e) => setEditing({...editing, title: e.target.value})}>
+                    <option value="">Automatic by document type</option>
+                    <option value="TAX INVOICE">Tax Invoice</option><option value="NON-GST INVOICE">Non-GST Invoice</option><option value="CASH BILL">Cash Bill</option><option value="SALES INVOICE">Sales Invoice</option><option value="SERVICE INVOICE">Service Invoice</option><option value="QUOTATION">Quotation</option>
+                    {editing.title && !['TAX INVOICE','NON-GST INVOICE','CASH BILL','SALES INVOICE','SERVICE INVOICE','QUOTATION'].includes(editing.title) && <option value={editing.title}>{editing.title}</option>}
+                  </select>
                 </Field>
                 <div className="form-grid">
                   <Field label="Paper">
@@ -642,6 +472,19 @@ export default function Templates() {
                       }
                     />
                   </Field>
+                  <Field label="Heading size">
+                    <input type="number" min="9" max="24" value={editing.headingFontSize} onChange={(e) => setEditing({...editing, headingFontSize: Math.max(9, Math.min(24, +e.target.value))})} />
+                  </Field>
+                  <Field label="Font family">
+                    <select value={editing.fontFamily} onChange={(e) => setEditing({...editing, fontFamily: e.target.value as InvoiceTemplate['fontFamily']})}>
+                      <option>Arial</option><option>Helvetica</option><option>Georgia</option><option>Times New Roman</option>
+                    </select>
+                  </Field>
+                  <Field label="Font weight">
+                    <select value={editing.fontWeight} onChange={(e) => setEditing({...editing, fontWeight: +e.target.value as InvoiceTemplate['fontWeight']})}>
+                      <option value="400">Regular</option><option value="500">Medium</option><option value="600">Semi-bold</option><option value="700">Bold</option>
+                    </select>
+                  </Field>
                   <Field label="Accent colour">
                     <input
                       type="color"
@@ -649,19 +492,23 @@ export default function Templates() {
                       onChange={(e) => setEditing({...editing, accent: e.target.value})}
                     />
                   </Field>
+                  <Field label="Text colour"><input type="color" value={editing.textColor} onChange={(e) => setEditing({...editing, textColor: e.target.value})} /></Field>
+                  <Field label="Grid line colour"><input type="color" value={editing.lineColor} onChange={(e) => setEditing({...editing, lineColor: e.target.value})} /></Field>
+                  <Field label="Grid line width"><input type="number" min="0.3" max="2" step="0.1" value={editing.lineWidth} onChange={(e) => setEditing({...editing, lineWidth: +e.target.value})} /></Field>
+                  <Field label="Title background"><input type="color" value={editing.titleBackground} onChange={(e) => setEditing({...editing, titleBackground: e.target.value})} /></Field>
+                  <Field label="Title text colour"><input type="color" value={editing.titleColor} onChange={(e) => setEditing({...editing, titleColor: e.target.value})} /></Field>
                 </div>
-                <Field label="Logo position">
-                  <select
-                    value={editing.logoPosition}
-                    onChange={(e) =>
-                      setEditing({...editing, logoPosition: e.target.value as InvoiceTemplate['logoPosition']})
-                    }
-                  >
-                    <option>left</option>
-                    <option>center</option>
-                    <option>right</option>
-                  </select>
-                </Field>
+                <Card title="Paper and letterhead calibration" sub="Use preprinted mode when the company header or footer already exists on the paper.">
+                  <div className="form-body calibration-grid">
+                    <Field label="Header mode"><select value={editing.headerMode} onChange={(e) => setEditing({...editing, headerMode: e.target.value as InvoiceTemplate['headerMode']})}><option value="preprinted">Preprinted - reserve blank space</option><option value="digital">Print company header</option><option value="hidden">No header or reserve</option></select></Field>
+                    <Field label="Footer mode"><select value={editing.footerMode} onChange={(e) => setEditing({...editing, footerMode: e.target.value as InvoiceTemplate['footerMode']})}><option value="preprinted">Preprinted - reserve blank space</option><option value="digital">Print contact footer</option><option value="hidden">No footer or reserve</option></select></Field>
+                    <Field label="Page side margin (mm)"><input type="number" min="5" max="25" step="0.5" value={editing.pageMarginMm} onChange={(e) => setEditing({...editing, pageMarginMm: +e.target.value})} /></Field>
+                    <Field label={editing.headerMode === 'preprinted' ? 'Preprinted header reserve (mm)' : 'Printed header height (mm)'}><input type="number" min="0" max="60" step="0.5" value={editing.topReserveMm} onChange={(e) => setEditing({...editing, topReserveMm: +e.target.value})} /></Field>
+                    <Field label={editing.footerMode === 'preprinted' ? 'Preprinted footer reserve (mm)' : 'Printed footer height (mm)'}><input type="number" min="0" max="40" step="0.5" value={editing.bottomReserveMm} onChange={(e) => setEditing({...editing, bottomReserveMm: +e.target.value})} /></Field>
+                    <Field label="Item area minimum height (mm)"><input type="number" min="60" max="160" step="1" value={editing.itemAreaMinHeightMm} onChange={(e) => setEditing({...editing, itemAreaMinHeightMm: +e.target.value})} /></Field>
+                    {editing.footerMode === 'digital' && <p className="hint">The contact footer uses the phone numbers, email and business address from <Link href="/settings">Company settings → Business identity</Link>.</p>}
+                  </div>
+                </Card>
                 <div className="check-row">
                   <label>
                     <input
@@ -671,20 +518,9 @@ export default function Templates() {
                     />
                     Table borders
                   </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={editing.striped}
-                      onChange={(e) => setEditing({...editing, striped: e.target.checked})}
-                    />
-                    Alternate row shading
-                  </label>
                 </div>
-                <Field label="Footer">
-                  <textarea
-                    value={editing.footer}
-                    onChange={(e) => setEditing({...editing, footer: e.target.value})}
-                  />
+                <Field label="Terms and conditions">
+                  <textarea value={editing.terms} onChange={(e) => setEditing({...editing, terms: e.target.value})} placeholder="One condition per line. Existing invoices keep their saved template revision." />
                 </Field>
               </div>
             </Card>
@@ -745,6 +581,7 @@ export default function Templates() {
                       <option>right</option>
                       <option>center</option>
                     </select>
+                    <input aria-label={'Width percentage for ' + col.label} title="Column width %" type="number" min="3" max="60" value={col.width || ''} placeholder="Width %" onChange={(e) => setEditing({...editing, columns: editing.columns.map((x, n) => n === i ? {...x, width: e.target.value ? +e.target.value : undefined} : x)})} />
                     {[-1, 1].map((dir) => (
                       <button
                         key={dir}
@@ -767,7 +604,7 @@ export default function Templates() {
           </div>
           <div className="template-live-preview">
             <div className="toolbar">
-              <strong>Live preview</strong>
+              <strong>Invoice preview</strong>
               <select
                 aria-label="Preview document"
                 value={sampleId}

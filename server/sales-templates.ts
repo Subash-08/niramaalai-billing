@@ -28,8 +28,10 @@ async function transaction<T>(db: Db, identity: Identity, work: (session: Client
 function settings(raw: any) {
   // Stored records contain audit/archive metadata. Validate only editable settings
   // so subsequent edits, copies and restores cannot leak metadata into strict input.
-  const keys = ['name', 'title', 'paper', 'orientation', 'fontSize', 'accent',
-    'borders', 'striped', 'logoPosition', 'fields', 'columns', 'footer', 'isDefault'];
+  const keys = ['name', 'title', 'paper', 'orientation', 'fontSize', 'headingFontSize', 'fontFamily', 'fontWeight',
+    'accent', 'textColor', 'lineColor', 'lineWidth', 'titleBackground', 'titleColor', 'pageMarginMm',
+    'topReserveMm', 'bottomReserveMm', 'itemAreaMinHeightMm', 'headerMode', 'footerMode',
+    'borders', 'striped', 'logoPosition', 'fields', 'columns', 'terms', 'footer', 'isDefault'];
   const input = Object.fromEntries(keys.filter(key => raw?.[key] !== undefined)
     .map(key => [key, raw[key]]));
   const {expectedRevision, ...result} = InvoiceTemplateInputSchema.parse(input);

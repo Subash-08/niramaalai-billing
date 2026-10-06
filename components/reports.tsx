@@ -257,7 +257,7 @@ export default function Reports() {
         </aside>
 
         <div className="stack">
-          {loading && <div className="notice" role="status">Loading live report…</div>}
+          {loading && <div className="notice" role="status">Loading report…</div>}
           {reportError && <div className="notice" role="alert">{reportError} Change a filter to retry. No demo data is shown.</div>}
           {report !== 'Invoice exports' && !loading && !reportError && <div className="stats-grid">
             <Card title="Matching records"><div className="body-pad"><h2>{rows.length}</h2><small>Current filters</small></div></Card>
@@ -513,7 +513,7 @@ export default function Reports() {
                   />
                 )}
                 <div className="table-footer">
-                  {rows.length} records · {isLive ? 'Live company data' : 'Based on current demo workspace'}
+                  {rows.length} records
                 </div>
               </>
             )}

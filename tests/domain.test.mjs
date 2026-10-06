@@ -153,3 +153,48 @@ test('no broken internal links exist in workspace routing', () => {
   assert.ok(!workspaceCode.includes("case 'suppliers':"), 'suppliers route must not be active');
   assert.ok(!workspaceCode.includes("case 'returns':"), 'returns route must not be active');
 });
+
+test('mixed GST invoice calculates each line with its own inclusive/exclusive mode', () => {
+  const line1 = {productId: 'p1', name: 'Flyer', qty: 1, rate: 118, discount: 0, tax: 18, serials: [], hsn: '4911', warranty: 0, inclusive: true, taxTreatment: 'Taxable'};
+  const line2 = {productId: 's1', name: 'Design', qty: 1, rate: 500, discount: 0, tax: 18, serials: [], hsn: '9983', warranty: 0, inclusive: false, taxTreatment: 'Taxable'};
+  const b = invoice({lines: [line1, line2], inclusive: true});
+  const t1 = d.lineTotal(line1, b.inclusive);
+  const t2 = d.lineTotal(line2, b.inclusive);
+  assert.equal(t1.base, 100);
+  assert.equal(t1.tax, 18);
+  assert.equal(t1.total, 118);
+  assert.equal(t2.base, 500);
+  assert.equal(t2.tax, 90);
+  assert.equal(t2.total, 590);
+  const sum = d.totals(b);
+  assert.equal(sum.base, 600);
+  assert.equal(sum.tax, 108);
+  assert.equal(sum.total, 708);
+  assert.equal(sum.cgst, 54);
+  assert.equal(sum.sgst, 54);
+});
+
+test('non-GST invoice has zero tax and entered price equals grand total', () => {
+  const lines = [
+    {productId: 'p1', name: 'Offset Print', qty: 10, rate: 50, discount: 0, tax: 0, serials: [], hsn: '4911', warranty: 0, inclusive: false, taxTreatment: 'NonGST', lineType: 'Product'},
+    {productId: 's1', name: 'Screen Print Service', qty: 1, rate: 1500, discount: 0, tax: 0, serials: [], hsn: '9983', warranty: 0, inclusive: false, taxTreatment: 'NonGST', lineType: 'Service'},
+    {productId: '', name: 'Custom Finishing Service', qty: 2, rate: 300, discount: 0, tax: 0, serials: [], hsn: '', warranty: 0, inclusive: false, taxTreatment: 'NonGST', lineType: 'Service'},
+    {productId: '', name: 'Shipping charge', qty: 1, rate: 250, discount: 0, tax: 0, serials: [], hsn: '', warranty: 0, inclusive: false, taxTreatment: 'NonGST', lineType: 'Charge'},
+    {productId: '', name: 'Additional charge', qty: 1, rate: 100, discount: 0, tax: 0, serials: [], hsn: '', warranty: 0, inclusive: false, taxTreatment: 'NonGST', lineType: 'Charge'},
+  ];
+  const b = invoice({lines, inclusive: false});
+  const sum = d.totals(b);
+  const expectedTotal = 10 * 50 + 1500 + 2 * 300 + 250 + 100; // 2950
+  assert.equal(sum.base, expectedTotal);
+  assert.equal(sum.tax, 0);
+  assert.equal(sum.cgst, 0);
+  assert.equal(sum.sgst, 0);
+  assert.equal(sum.igst, 0);
+  assert.equal(sum.total, expectedTotal);
+
+  const isNonGst = b.lines.length > 0 && b.lines.every(l => l.taxTreatment === 'NonGST');
+  assert.equal(isNonGst, true);
+  const automaticTitle = b.kind === 'Quotation' ? 'QUOTATION' : isNonGst ? 'NON-GST INVOICE' : sum.tax > 0 ? 'TAX INVOICE' : 'CASH BILL';
+  assert.equal(automaticTitle, 'NON-GST INVOICE');
+});
+

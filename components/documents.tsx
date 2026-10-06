@@ -128,6 +128,7 @@ export function DocumentComposer({
     if (existing) {
       return existing.lines.map((line: any) => ({
         ...line,
+        inclusive: line.inclusive ?? existing.inclusive,
         clientLineKey: line.clientLineKey || uid('CLK'),
         qty: isReceiptMode ? Math.max(0, (line.quantityOrdered ?? line.qty) - (line.quantityReceived ?? 0) - (line.quantityCancelled ?? 0)) : (line.quantityOrdered ?? line.qty),
         serials: [],
@@ -136,6 +137,7 @@ export function DocumentComposer({
     if (source?.lines) {
       return source.lines.map((l: any) => ({
         ...l,
+        inclusive: l.inclusive ?? source.inclusive ?? true,
         clientLineKey: l.clientLineKey || uid('CLK'),
         serials: [],
       }));
@@ -169,6 +171,10 @@ export function DocumentComposer({
     existing?.placeOfSupply || source?.placeOfSupply || 'Tamil Nadu'
   );
   const [inclusive, setInclusive] = useState(existing?.inclusive ?? source?.inclusive ?? true);
+  const [nonGst, setNonGst] = useState(() => {
+    const initialLines = existing?.lines || source?.lines || [];
+    return initialLines.length > 0 && initialLines.every((line: any) => line.taxTreatment === 'NonGST');
+  });
   const [notes, setNotes] = useState(existing?.notes || source?.notes || '');
   const [category, setCategory] = useState<Bill['category']>('New goods');
   const service = false;
@@ -212,6 +218,9 @@ export function DocumentComposer({
   const [orderRef, setOrderRef] = useState('');
   const [deliveryNote, setDeliveryNote] = useState('');
   const [dispatch, setDispatch] = useState('');
+  const [supplyDate, setSupplyDate] = useState(TODAY);
+  const [vehicleNumber, setVehicleNumber] = useState('');
+  const [reverseCharge, setReverseCharge] = useState(false);
   const [busy, setBusy] = useState(false);
   const [attachmentFileId, setAttachmentFileId] = useState((existing as any)?.attachmentFileId || '');
   const [attachmentName, setAttachmentName] = useState('');
@@ -276,6 +285,9 @@ export function DocumentComposer({
     orderRef,
     deliveryNote,
     dispatch,
+    supplyDate,
+    vehicleNumber,
+    reverseCharge,
     jobId: service ? job?.id : undefined,
     enquiryId: source?.enquiryId || enquiry?.id,
     sourceId: quotation ? undefined : source?.id,
@@ -373,6 +385,7 @@ export function DocumentComposer({
         if (q.templateId) setTemplateId(q.templateId);
         if (q.orderReference) setOrderRef(q.orderReference);
         if (q.lines?.length) {
+          setNonGst(q.lines.every((l: any) => l.taxTreatment === 'NonGST'));
           setLines(q.lines.map((l: any) => ({
             ...blankLine(),
             productId: l.productId || '',
@@ -383,6 +396,7 @@ export function DocumentComposer({
             discountType: l.discountType || 'Percentage',
             tax: l.tax ?? (l.taxBasisPoints ? l.taxBasisPoints / 100 : 0),
             taxTreatment: l.taxTreatment || 'Taxable',
+            inclusive: l.inclusive ?? q.inclusive ?? true,
             hsn: l.hsn || '',
             sac: l.sac || '',
             warranty: l.warranty ?? l.warrantyMonths ?? 0,
@@ -407,6 +421,7 @@ export function DocumentComposer({
           if (q.notes !== undefined) setNotes(q.notes);
           if (q.templateId) setTemplateId(q.templateId);
           if (q.lines?.length) {
+            setNonGst(q.lines.every((l: any) => l.taxTreatment === 'NonGST'));
             setLines(q.lines.map((l: any) => ({
               ...blankLine(),
               productId: l.productId || '',
@@ -421,6 +436,7 @@ export function DocumentComposer({
               discountType: l.discountType || 'Percentage',
               tax: l.tax ?? (l.taxBasisPoints ? l.taxBasisPoints / 100 : 0),
               taxTreatment: l.taxTreatment || 'Taxable',
+              inclusive: l.inclusive ?? q.inclusive ?? true,
               hsn: l.hsn || l.sac || '',
               sac: l.sac || '',
               warranty: l.warranty ?? l.warrantyMonths ?? 0,
@@ -449,8 +465,12 @@ export function DocumentComposer({
           if (inv.orderReference) setOrderRef(inv.orderReference);
           if (inv.deliveryNote) setDeliveryNote(inv.deliveryNote);
           if (inv.dispatchThrough) setDispatch(inv.dispatchThrough);
+          setSupplyDate(inv.supplyDate || inv.invoiceDate || inv.date || TODAY);
+          setVehicleNumber(inv.vehicleNumber || '');
+          setReverseCharge(!!inv.reverseCharge);
           if (inv.printJobId || inv.jobId) setPrintJobId(inv.printJobId || inv.jobId);
           if (inv.lines?.length) {
+            setNonGst(inv.lines.every((l: any) => l.taxTreatment === 'NonGST'));
             setLines(inv.lines.map((l: any) => ({
               ...blankLine(),
               productId: l.productId || '',
@@ -465,6 +485,7 @@ export function DocumentComposer({
               discountType: l.discountType || 'Percentage',
               tax: l.tax ?? (l.taxBasisPoints ? l.taxBasisPoints / 100 : 0),
               taxTreatment: l.taxTreatment || 'Taxable',
+              inclusive: l.inclusive ?? inv.inclusive ?? true,
               hsn: l.hsn || l.sac || '',
               sac: l.sac || '',
               warranty: l.warranty ?? l.warrantyMonths ?? 0,
@@ -572,6 +593,20 @@ export function DocumentComposer({
     setLines((ls) => ls.map((l, n) => (n === i ? { ...l, [k]: v, ...(k === 'qty' ? { serials: [] } : {}) } : l)));
   }
 
+  function setTaxDocumentMode(nextNonGst: boolean) {
+    setNonGst(nextNonGst);
+    if (nextNonGst) {
+      setInclusive(false);
+      setLines((current) => current.map((line) => ({...line, inclusive: false, taxTreatment: 'NonGST', tax: 0})));
+      return;
+    }
+    setLines((current) => current.map((line) => {
+      const productTax = state.products.find((product) => product.id === line.productId)?.tax;
+      const serviceTax = state.serviceCatalog.find((item: any) => item.id === line.serviceId)?.tax;
+      return {...line, inclusive: line.inclusive ?? inclusive, taxTreatment: 'Taxable', tax: line.tax || serviceTax || productTax || 18};
+    }));
+  }
+
   function updatePrintSpecification(i: number, key: string, value: string) {
     setLines((current) => current.map((line, index) => index === i
       ? {...line, printSpecifications: {...(line.printSpecifications || {}), [key]: value}}
@@ -622,8 +657,10 @@ export function DocumentComposer({
           : inclusive
             ? p.price
             : Math.round((p.price / (1 + p.tax / 100)) * 100) / 100,
+        inclusive: nonGst ? false : inclusive,
         discount: 0,
-        tax: p.tax,
+        tax: nonGst ? 0 : p.tax,
+        taxTreatment: nonGst ? 'NonGST' : 'Taxable',
         serials: [],
         isSerialTracked: p.isSerialTracked,
         hsn: p.hsn,
@@ -966,6 +1003,7 @@ export function DocumentComposer({
           unitRatePaise: Math.round((l.rate || 0) * 100),
           discountType: (l.discountType || 'Percentage') as 'Percentage' | 'Amount',
           discountValue: Math.round((l.discount || 0) * 100),
+          inclusive: nonGst ? false : (l.inclusive ?? inclusive),
           taxBasisPoints: isZeroTax ? 0 : Math.round((l.tax || 0) * 100),
           taxTreatment: treatment,
         };
@@ -1061,6 +1099,9 @@ export function DocumentComposer({
         orderReference: orderRef.trim(),
         deliveryNote: deliveryNote.trim(),
         dispatchThrough: dispatch.trim(),
+        supplyDate: supplyDate || date,
+        vehicleNumber: vehicleNumber.trim(),
+        reverseCharge,
         notes: notes.trim(),
         printJobId: printJobId || undefined,
         sourceQuotationId: params.get('from') || undefined,
@@ -1365,7 +1406,14 @@ export function DocumentComposer({
               </Field>
             )}
 
-            <Field label="GST supply type">
+            {!purchase && <Field label="Invoice tax type">
+              <select value={nonGst ? 'non-gst' : 'gst'} onChange={(e) => setTaxDocumentMode(e.target.value === 'non-gst')}>
+                <option value="gst">GST invoice</option>
+                <option value="non-gst">Non-GST invoice</option>
+              </select>
+            </Field>}
+
+            {!nonGst && <Field label="GST supply type">
               <select value={taxMode} onChange={(e) => {
                 setTaxMode(e.target.value as typeof taxMode);
                 const destination = shipSeparate ? shipTo.state : billTo.state;
@@ -1374,24 +1422,27 @@ export function DocumentComposer({
                 <option value="Intra-state">Within state · CGST + SGST</option>
                 <option value="Inter-state">Interstate · IGST</option>
               </select>
-            </Field>
+            </Field>}
 
-            <Field label="Place of supply">
+            {!nonGst && <Field label="Place of supply">
               <input
                 value={placeOfSupply}
                 onChange={(e) => setPlaceOfSupply(e.target.value)}
                 placeholder="State / union territory"
               />
-            </Field>
+            </Field>}
 
             <Field label="Price entry mode">
               <select
-                value={inclusive ? 'inclusive' : 'exclusive'}
+                value={nonGst ? 'non-gst' : (inclusive ? 'inclusive' : 'exclusive')}
+                disabled={nonGst}
                 onChange={(e) => setInclusive(e.target.value === 'inclusive')}
               >
+                {nonGst && <option value="non-gst">Non-GST · entered rate is final</option>}
                 <option value="inclusive">GST inclusive · entered rate includes tax</option>
                 <option value="exclusive">GST exclusive · add tax to entered rate</option>
               </select>
+              {!nonGst && <span className="muted">This is the default for new items. Each item can use its own mode below.</span>}
             </Field>
 
             {person && (
@@ -1401,7 +1452,7 @@ export function DocumentComposer({
                   {person.phone} · {person.email || 'No email'}
                 </span>
                 <p>{person.address}</p>
-                <small>GSTIN: {person.gst || 'Not provided'}</small>
+                {!nonGst && <small>GSTIN: {person.gst || 'Not provided'}</small>}
                 {!purchase && (person as any).details?.creditLimit && (
                   <p>
                     Credit limit: {money(Number((person as any).details?.creditLimit))} · Review existing and new dues
@@ -1496,9 +1547,9 @@ export function DocumentComposer({
         <Card
           title="Invoice items"
           sub={
-            inclusive
-              ? 'Rates include GST. Discounts apply before tax; charges use their own editable GST rate.'
-              : 'GST is added after discount. Changing the price mode reinterprets the entered rates.'
+            nonGst
+              ? 'Non-GST invoice. Entered rates are final and no GST is calculated or printed.'
+              : 'Each item can use GST-inclusive or GST-exclusive pricing. Discounts apply before tax; charges use their own editable GST rate.'
           }
           actions={<span className="muted">{lines.length} lines</span>}
         >
@@ -1564,7 +1615,9 @@ export function DocumentComposer({
                         details: x.description || '',
                         unit: x.unit || 'Job',
                         rate: inclusive ? x.rate : x.rate / (1 + x.tax / 100),
-                        tax: x.tax,
+                        inclusive: nonGst ? false : inclusive,
+                        tax: nonGst ? 0 : x.tax,
+                        taxTreatment: nonGst ? 'NonGST' : 'Taxable',
                         hsn: x.sac,
                         warranty: x.warranty,
                         clientLineKey: uid('CLK'),
@@ -1583,14 +1636,14 @@ export function DocumentComposer({
           )}
 
           <div className="table-wrap">
-            <table className="line-table">
+            <table className={`line-table invoice-lines-table ${nonGst ? 'non-gst-lines' : ''}`}>
               <thead>
                 <tr>
                   <th>Item / HSN</th>
                   <th>Qty</th>
-                  <th>Rate {inclusive ? 'incl. GST' : 'excl. GST'}</th>
+                  <th>Rate / price mode</th>
                   <th>Discount</th>
-                  <th>GST %</th>
+                  {!nonGst && <th>GST %</th>}
                   <th>Total</th>
                   <th />
                 </tr>
@@ -1660,8 +1713,17 @@ export function DocumentComposer({
                         value={l.rate}
                         onChange={(e) => update(i, 'rate', +e.target.value)}
                       />
+                      {!nonGst && <select
+                        aria-label={`Item ${i + 1} price entry mode`}
+                        value={(l.inclusive ?? inclusive) ? 'inclusive' : 'exclusive'}
+                        disabled={isPosted}
+                        onChange={(e) => update(i, 'inclusive', e.target.value === 'inclusive')}
+                      >
+                        <option value="inclusive">GST incl.</option>
+                        <option value="exclusive">GST excl.</option>
+                      </select>}
                     </td>
-                    <td>
+                    {!nonGst && <td>
                       <input
                         aria-label={`Item ${i + 1} discount`}
                         className="table-input"
@@ -1684,7 +1746,7 @@ export function DocumentComposer({
                         <option value="Percentage">%</option>
                         <option value="Amount">₹ per line</option>
                       </select>
-                    </td>
+                    </td>}
                     <td>
                       <select
                         aria-label={`Item ${i + 1} tax treatment`}
@@ -1721,7 +1783,7 @@ export function DocumentComposer({
                     <td className="amount">
                       {money(lineTotal(l, inclusive).total)}
                       <small>Base {money(lineTotal(l, inclusive).base)}</small>
-                      <small>GST {money(lineTotal(l, inclusive).tax)}</small>
+                      {!nonGst && <small>GST {money(lineTotal(l, inclusive).tax)}</small>}
                     </td>
                     <td>
                       <div className="action-cell">
@@ -1778,7 +1840,9 @@ export function DocumentComposer({
                     name: 'Shipping charge',
                     qty: 1,
                     rate: 0,
-                    tax: 18,
+                    inclusive: nonGst ? false : inclusive,
+                    tax: nonGst ? 0 : 18,
+                    taxTreatment: nonGst ? 'NonGST' : 'Taxable',
                     warranty: 0,
                     clientLineKey: uid('CLK'),
                   } as any,
@@ -1798,7 +1862,9 @@ export function DocumentComposer({
                     name: 'Additional charge',
                     qty: 1,
                     rate: 0,
-                    tax: 18,
+                    inclusive: nonGst ? false : inclusive,
+                    tax: nonGst ? 0 : 18,
+                    taxTreatment: nonGst ? 'NonGST' : 'Taxable',
                     warranty: 0,
                     clientLineKey: uid('CLK'),
                   } as any,
@@ -1808,7 +1874,7 @@ export function DocumentComposer({
               Add other charge
             </Btn>
             {!purchase && (
-              <Btn secondary onClick={() => setLines((ls) => [...ls, { ...blankLine(), lineType: 'Service', unit: 'Job' }])}>
+              <Btn secondary onClick={() => setLines((ls) => [...ls, { ...blankLine(), lineType: 'Service', unit: 'Job', inclusive: nonGst ? false : inclusive, tax: nonGst ? 0 : 18, taxTreatment: nonGst ? 'NonGST' : 'Taxable' }])}>
                 <Plus size={14} />
                 Add custom service line
               </Btn>
@@ -1951,9 +2017,19 @@ export function DocumentComposer({
                 <Field label="Delivery note">
                   <input value={deliveryNote} onChange={(e) => setDeliveryNote(e.target.value)} />
                 </Field>
-                <Field label="Dispatched through">
+                <Field label="Transport mode">
                   <input value={dispatch} onChange={(e) => setDispatch(e.target.value)} />
                 </Field>
+                <Field label="Vehicle number">
+                  <input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} />
+                </Field>
+                <Field label="Date of supply">
+                  <input type="date" value={supplyDate} onChange={(e) => setSupplyDate(e.target.value)} />
+                </Field>
+                <label className="check-row">
+                  <input type="checkbox" checked={reverseCharge} onChange={(e) => setReverseCharge(e.target.checked)} />
+                  Reverse charge applies
+                </label>
               </details>
               <Field label="Printed notes">
                 <textarea
@@ -2634,7 +2710,7 @@ export default function Documents({
 
   if (id && isLive && (detailLoading || (!detailData && !detailError))) {
     const documentName = purchase ? 'purchase' : quotation ? 'quotation' : 'invoice';
-    return <Empty title={`Loading ${documentName}…`} text={`Loading the live ${documentName} details. A newly created document may take a moment to appear.`} />;
+    return <Empty title={`Loading ${documentName}…`} text={`Loading the ${documentName} details. A newly created document may take a moment to appear.`} />;
   }
   if (id && isLive && detailError) {
     const missing = /not found/i.test(detailError);
@@ -3695,7 +3771,7 @@ export default function Documents({
             <Empty
               title={
                 (purchase && purchaseListLoading) || (quotation && quotationListLoading) || (!purchase && !quotation && invoiceListLoading)
-                  ? 'Loading live records…'
+                  ? 'Loading records…'
                   : 'No matching records'
               }
               text={

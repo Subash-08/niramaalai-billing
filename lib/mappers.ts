@@ -1,5 +1,5 @@
 import { Customer, Supplier, Product, Enquiry, TODAY } from './domain';
-import { ServiceItem, InvoiceTemplate } from './extensions';
+import { ServiceItem, InvoiceTemplate, extensionSeed } from './extensions';
 
 /**
  * Canonical mappers from MongoDB backend document shapes to frontend domain types.
@@ -83,20 +83,36 @@ export function mapServiceFromApi(doc: any): ServiceItem {
 }
 
 export function mapTemplateFromApi(doc: any): InvoiceTemplate {
+  const defaults = extensionSeed.templates[0];
   return {
     id: doc._id || doc.id,
     name: doc.name || '',
     title: doc.title || '',
-    fields: doc.fields || {},
-    columns: doc.columns || [],
+    fields: {...defaults.fields, ...(doc.fields || {})},
+    columns: (doc.columns?.some((column: any) => column.id === 'unit') && doc.columns?.some((column: any) => column.id === 'gross') ? doc.columns : defaults.columns).map((column: any) => ({...column})),
     paper: doc.paper || 'A4',
     orientation: doc.orientation || 'portrait',
     fontSize: doc.fontSize || 12,
+    headingFontSize: doc.headingFontSize || defaults.headingFontSize,
+    fontFamily: doc.fontFamily || defaults.fontFamily,
+    fontWeight: doc.fontWeight || defaults.fontWeight,
     accent: doc.accent || '#6246e5',
+    textColor: doc.textColor || defaults.textColor,
+    lineColor: doc.lineColor || defaults.lineColor,
+    lineWidth: doc.lineWidth ?? defaults.lineWidth,
+    titleBackground: doc.titleBackground || defaults.titleBackground,
+    titleColor: doc.titleColor || defaults.titleColor,
+    pageMarginMm: doc.pageMarginMm ?? defaults.pageMarginMm,
+    topReserveMm: doc.topReserveMm ?? defaults.topReserveMm,
+    bottomReserveMm: doc.bottomReserveMm ?? defaults.bottomReserveMm,
+    itemAreaMinHeightMm: doc.itemAreaMinHeightMm ?? defaults.itemAreaMinHeightMm,
+    headerMode: doc.headerMode || defaults.headerMode,
+    footerMode: doc.footerMode || defaults.footerMode,
     borders: doc.borders !== undefined ? doc.borders : true,
     striped: doc.striped !== undefined ? doc.striped : false,
     logoPosition: doc.logoPosition || 'left',
     footer: doc.footer || '',
+    terms: doc.terms || '',
     isDefault: !!doc.isDefault,
     status: doc.status || 'Active',
     revision: doc.currentRevision ?? doc.revision,
@@ -380,6 +396,7 @@ export function mapInvoiceFromApi(doc: any) {
       rate: (l.unitRatePaise || 0) / 100,
       discount: (l.discountValue || 0) / 100,
       discountType: l.discountType || 'Percentage',
+      inclusive: l.inclusive ?? !!doc.inclusive,
       tax: (l.taxBasisPoints || 0) / 100,
       taxTreatment: (l.taxTreatment || 'Taxable') as 'Taxable' | 'Exempt' | 'NonGST',
       returnedQuantity: l.returnedQuantity || 0,
@@ -395,6 +412,9 @@ export function mapInvoiceFromApi(doc: any) {
     inclusive: !!doc.inclusive,
     taxMode: doc.taxMode || 'Intra-state',
     placeOfSupply: doc.placeOfSupply || '',
+    supplyDate: doc.supplyDate || doc.issuedSnapshot?.supplyDate || doc.invoiceDate || '',
+    vehicleNumber: doc.vehicleNumber || doc.issuedSnapshot?.vehicleNumber || '',
+    reverseCharge: !!(doc.reverseCharge ?? doc.issuedSnapshot?.reverseCharge),
     notes: doc.notes || '',
     profit: null,
     customerSnapshot: doc.customerSnapshot ? mapCustomerFromApi(doc.customerSnapshot) : undefined,
@@ -404,6 +424,9 @@ export function mapInvoiceFromApi(doc: any) {
     shopSnapshot: doc.issuedSnapshot?.seller ? {...doc.issuedSnapshot.seller, logo: doc.issuedSnapshot.seller.logoFileId ? '/api/files/' + doc.issuedSnapshot.seller.logoFileId : ''} : undefined,
     billTo: doc.billTo,
     shipTo: doc.shipTo,
+    orderRef: doc.orderReference || '',
+    deliveryNote: doc.deliveryNote || '',
+    dispatch: doc.dispatchThrough || '',
     sourceId: doc.sourceQuotationId,
     printJobId: doc.printJobId || undefined,
     jobId: doc.printJobId || doc.jobId || undefined,
@@ -438,6 +461,7 @@ export function mapQuotationFromApi(doc: any) {
       rate: (l.unitRatePaise || 0) / 100,
       discount: (l.discountValue || 0) / 100,
       discountType: l.discountType || 'Percentage',
+      inclusive: l.inclusive ?? !!doc.inclusive,
       tax: (l.taxBasisPoints || 0) / 100,
       taxTreatment: (l.taxTreatment || 'Taxable') as 'Taxable' | 'Exempt' | 'NonGST',
       serials: [],

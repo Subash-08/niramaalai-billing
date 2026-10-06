@@ -178,9 +178,6 @@ export default function Shell({children}: {children: ReactNode}) {
                   >
                     <I size={18} />
                      <span>{label as string}</span>
-                    <em className={`module-badge ${moduleMode(url as string)}`}>
-                      {moduleMode(url as string) === 'mixed' ? 'Partly live' : moduleMode(url as string) === 'live' ? 'Live' : 'Preview'}
-                    </em>
                   </Link>
                 );
               })}
@@ -279,9 +276,7 @@ export default function Shell({children}: {children: ReactNode}) {
           {isLoading ? (
             <span className="session-pill loading">Checking account…</span>
           ) : isLive ? (
-            <span className="live-pill" title="Connected to multi-tenant live company account">
-              Live data · {companyName}
-            </span>
+            <span className="live-pill" title="Current company">{companyName}</span>
           ) : (
             <span className="demo-pill">Sign in required</span>
           )}
@@ -337,7 +332,7 @@ export default function Shell({children}: {children: ReactNode}) {
                 <div className={`account-data-status ${isLive ? 'live' : 'demo'}`}>
                   <span className="online-dot" />
                   <div>
-                    <strong>{isLive ? 'Live company data' : 'Sign in required'}</strong>
+                    <strong>{isLive ? 'Company account' : 'Sign in required'}</strong>
                     <small>{isLive ? companyName : 'No billing data is loaded'}</small>
                   </div>
                 </div>
@@ -355,7 +350,7 @@ export default function Shell({children}: {children: ReactNode}) {
                   </button>
                 ) : (
                   <Link href="/account" className="account-sign-in" role="menuitem" onClick={() => setAccountOpen(false)}>
-                    Sign in to live data
+                    Sign in
                   </Link>
                 )}
               </div>
@@ -387,13 +382,8 @@ export default function Shell({children}: {children: ReactNode}) {
           )}
           {pageMode === 'mixed' && (
             <div className="module-migration-notice mixed" role="status">
-              <strong>Partly live:</strong> Connected actions save to your company account. Some related workflows are still
+              <strong>Workflow notice:</strong> Connected actions save to your company account. Some related workflows are still
               incomplete or under review. A saved record does not mean every linked payment, report or preview is complete.
-            </div>
-          )}
-          {pageMode === 'live' && (
-            <div className="module-migration-notice live" role="status">
-              <strong>Live data:</strong> Changes on this page are saved to the current company account.
             </div>
           )}
           {children}
@@ -401,7 +391,7 @@ export default function Shell({children}: {children: ReactNode}) {
 
         <footer className="app-footer">
           <span>{isLive ? companySession?.company?.name || state.settings.name || 'Billing Software' : 'Billing Software'}</span>
-          <span>{isLive ? `${pageMode === 'preview' ? 'Preview' : pageMode === 'mixed' ? 'Partly live' : 'Live'} module · Multi-tenant account` : 'Secure company access'}</span>
+          <span>{isLive ? 'Billing workspace' : 'Secure company access'}</span>
         </footer>
       </div>
     </div>

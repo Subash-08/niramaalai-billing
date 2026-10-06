@@ -1,7 +1,8 @@
 /** Shared UI arithmetic. Amount discounts apply to the whole line before tax. */
 export function roundMoney(value:number){return Math.round((value+Number.EPSILON)*100)/100;}
-export type GstInput={qty:number;rate:number;tax:number;discount:number;discountType?:'Percentage'|'Amount';taxTreatment?:'Taxable'|'Exempt'|'NonGST'};
+export type GstInput={qty:number;rate:number;tax:number;discount:number;discountType?:'Percentage'|'Amount';taxTreatment?:'Taxable'|'Exempt'|'NonGST';inclusive?:boolean};
 export function calculateGst(l:GstInput,inclusive:boolean,taxMode:'Intra-state'|'Inter-state'='Intra-state'){
+ inclusive=l.inclusive ?? inclusive;
  const gross=l.qty*l.rate;
  const discount=l.discountType==='Amount'?l.discount:gross*l.discount/100;
  const discounted=roundMoney(gross-discount);

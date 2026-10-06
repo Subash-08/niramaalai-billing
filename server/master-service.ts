@@ -59,6 +59,7 @@ export async function getCompanySettings(identity: Identity) {
       tenantId: identity.tenantId,
       name: tenant?.companyName || 'My Store',
       phone: '',
+      alternatePhone: '',
       email: '',
       address: '',
       gst: '',
@@ -66,9 +67,18 @@ export async function getCompanySettings(identity: Identity) {
       stateCode: '',
       postalCode: '',
       bank: '',
+      bankBranch: '',
       account: '',
       ifsc: '',
       declaration: 'Goods once sold will not be taken back.',
+      invoiceHeaderSubtitle: '',
+      invoiceNumberLabel: 'Invoice No',
+      invoicePrefix: 'INV',
+      serviceInvoicePrefix: 'SRV',
+      invoiceStartNumber: 1,
+      invoiceNumberPadding: 4,
+      invoiceIncludeFinancialYear: true,
+      invoiceNumberSeparator: '-',
       logoFileId: '',
       demoImported: false,
     };
@@ -96,6 +106,27 @@ export async function updateCompanySettings(identity: Identity, input: CompanySe
       }
 
       const existing = await col(db, 'companySettings').findOne({tenantId: identity.tenantId}, {session});
+
+      const previousStart = Number(existing?.invoiceStartNumber || 1);
+      if (input.invoiceStartNumber !== previousStart) {
+        const today = todayInKolkata();
+        const year = Number(today.slice(0, 4));
+        const month = Number(today.slice(5, 7));
+        const financialYear = month >= 4 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+        const counterYear = input.invoiceIncludeFinancialYear ? financialYear : 'ALL';
+        for (const sequenceType of ['Invoice', 'ServiceInvoice'] as const) {
+          const counterId = `CNT-${identity.tenantId}-${sequenceType}-${counterYear}`;
+          const counter = await col(db, 'tenantCounters').findOne({_id: counterId, tenantId: identity.tenantId}, {session});
+          if (counter && input.invoiceStartNumber <= Number(counter.currentValue || 0)) {
+            throw new AppError(409, `Starting number must be greater than the last ${sequenceType === 'Invoice' ? 'sales' : 'service'} invoice number (${counter.currentValue}).`);
+          }
+          await col(db, 'tenantCounters').updateOne(
+            {_id: counterId, tenantId: identity.tenantId},
+            {$set: {tenantId: identity.tenantId, sequenceType, year: counterYear, currentValue: input.invoiceStartNumber - 1, updatedAt: new Date()}},
+            {upsert: true, session}
+          );
+        }
+      }
 
       const update = {
         ...input,

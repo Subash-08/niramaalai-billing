@@ -42,6 +42,7 @@ const CommonLine = z.object({
   discountValue: Paise.default(0),
   taxBasisPoints: z.number().int().min(0).max(10000),
   taxTreatment: z.enum(['Taxable', 'Exempt', 'NonGST']).default('Taxable'),
+  inclusive: z.boolean().optional(),
 });
 
 export const SaleLineInputSchema = z.discriminatedUnion('lineType', [
@@ -121,7 +122,9 @@ const InvoiceDraftBase = z.object({
   sourceQuotationId: Id.nullish(), serviceJobId: Id.nullish(), enquiryId: Id.nullish(), reservationId: Id.nullish(),
   printJobId: Id.nullish(),
   orderReference: z.string().trim().max(100).default(''), deliveryNote: z.string().trim().max(100).default(''),
-  dispatchThrough: z.string().trim().max(100).default(''), notes: z.string().trim().max(4000).default(''),
+  dispatchThrough: z.string().trim().max(100).default(''),
+  supplyDate: CalendarDate.nullish(), vehicleNumber: z.string().trim().max(40).default(''),
+  reverseCharge: z.boolean().default(false), notes: z.string().trim().max(4000).default(''),
   roundOffPaise: z.number().int().min(-99).max(99).default(0),
   lines: z.array(SaleLineInputSchema).min(1).max(200),
 });
