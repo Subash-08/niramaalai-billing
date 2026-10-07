@@ -704,10 +704,20 @@ export async function issueInvoice(db: Db, identity: Identity, rawInput: IssueIn
       // No product stock posting. Quantity is used only for invoice calculation.
     }
     const year = deriveFinancialYear(draft.invoiceDate);
-    const prefix = draft.invoiceKind === 'Service' ? (seller.serviceInvoicePrefix || 'SRV') : (seller.invoicePrefix || 'INV');
-    const sequenceType = draft.invoiceKind === 'Service' ? 'ServiceInvoice' : 'Invoice';
+    // Tax treatment controls the public number sequence. This keeps every GST
+    // invoice together and every Non-GST invoice together, including services.
+    const isNonGstInvoice = draft.lines.length > 0 && draft.lines.every((line: SaleLineDocument) => line.taxTreatment === 'NonGST');
+    const sharedNumbering = seller.invoiceNumberingMode === 'shared';
+    const prefix = sharedNumbering
+      ? (seller.invoicePrefix || seller.gstInvoicePrefix || 'INV')
+      : (isNonGstInvoice ? (seller.nonGstInvoicePrefix || 'NGST') : (seller.gstInvoicePrefix || seller.invoicePrefix || 'INV'));
+    const sequenceType = sharedNumbering ? 'Invoice' : (isNonGstInvoice ? 'NonGSTInvoice' : 'Invoice');
     const sequenceFormat = {
-      startNumber: seller.invoiceStartNumber || 1,
+      startNumber: sharedNumbering
+        ? (seller.gstInvoiceStartNumber || seller.invoiceStartNumber || 1)
+        : (isNonGstInvoice
+        ? (seller.nonGstInvoiceStartNumber || 1)
+        : (seller.gstInvoiceStartNumber || seller.invoiceStartNumber || 1)),
       padding: seller.invoiceNumberPadding ?? 4,
       includeYear: seller.invoiceIncludeFinancialYear !== false,
       separator: seller.invoiceNumberSeparator ?? '-' as '-' | '/' | '_' | '',
@@ -721,7 +731,12 @@ export async function issueInvoice(db: Db, identity: Identity, rawInput: IssueIn
     }
     if (!invoiceNumber) throw new AppError(409, 'Could not find an unused invoice number after 1,000 attempts. Move the starting number forward in Company settings.');
     const settlement = await settleInvoiceOnIssue(db, identity, session, {...draft, totalPaise: totals.totalPaise, invoiceNumber}, input);
-    const sellerSnapshot = Object.fromEntries(['name','phone','alternatePhone','email','address','gst','state','stateCode','postalCode','bank','bankBranch','account','ifsc','declaration','logoFileId','invoiceHeaderSubtitle','invoiceNumberLabel'].map(key => [key, seller[key] ?? '']));
+    const sellerSnapshot = Object.fromEntries(['name','phone','alternatePhone','email','address','gst','state','stateCode','postalCode','bank','bankBranch','account','ifsc','declaration','logoFileId','invoiceHeaderSubtitle'].map(key => [key, seller[key] ?? '']));
+    sellerSnapshot.invoiceNumberLabel = sharedNumbering
+      ? (seller.invoiceNumberLabel || 'Invoice No')
+      : (isNonGstInvoice
+      ? (seller.nonGstInvoiceNumberLabel || 'Non-GST Invoice No')
+      : (seller.gstInvoiceNumberLabel || seller.invoiceNumberLabel || 'GST Invoice No'));
     const issuedSnapshot = {schemaVersion: 1, invoiceNumber, invoiceDate: draft.invoiceDate, dueDate: draft.dueDate,
       seller: sellerSnapshot, customer: draft.customerSnapshot, billTo: draft.billTo, shipTo: draft.shipTo,
       invoiceKind: draft.invoiceKind, businessCategory: draft.businessCategory,
@@ -853,6 +868,11 @@ export function buildSalesFilter(identity: Identity, raw: unknown, kind: 'invoic
   } else if (params.status) filter.status = params.status;
   if (params.customerId) filter.customerId = params.customerId;
   if (params.businessCategory) filter.businessCategory = params.businessCategory;
+  if (params.taxType === 'NonGST') {
+    filter.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
+  } else if (params.taxType === 'GST') {
+    filter.lines = {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}};
+  }
   if (params.dateFrom || params.dateTo) filter[kind === 'invoices' ? 'invoiceDate' : 'quotationDate'] = {
     ...(params.dateFrom && {$gte: params.dateFrom}), ...(params.dateTo && {$lte: params.dateTo})};
   if (params.hasDue === 'true') {
@@ -910,6 +930,15 @@ export async function getSalesSummary(
     matchInvoices.customerId = params.customerId;
     matchQuotations.customerId = params.customerId;
   }
+  const nonGstInvoiceExpression = {
+    $and: [
+      {$gt: [{$size: {$ifNull: ['$lines', []]}}, 0]},
+      {$eq: [
+        {$size: {$filter: {input: {$ifNull: ['$lines', []]}, as: 'line', cond: {$eq: ['$$line.taxTreatment', 'NonGST']}}}},
+        {$size: {$ifNull: ['$lines', []]}},
+      ]},
+    ],
+  };
 
   const [invoicesFacet, quotationsFacet, advancesRes] = await Promise.all([
     col<InvoiceDocument>(db, 'invoices').aggregate([
@@ -938,6 +967,14 @@ export async function getSalesSummary(
                 totalDuePaise: {$sum: '$duePaise'},
               },
             },
+          ],
+          gstSales: [
+            {$match: {status: 'Issued', $expr: {$not: [nonGstInvoiceExpression]}}},
+            {$group: {_id: null, count: {$sum: 1}, totalPaise: {$sum: '$totalPaise'}}},
+          ],
+          nonGstSales: [
+            {$match: {status: 'Issued', $expr: nonGstInvoiceExpression}},
+            {$group: {_id: null, count: {$sum: 1}, totalPaise: {$sum: '$totalPaise'}}},
           ],
           unpaidDue: [
             {$match: {status: 'Issued', duePaise: {$gt: 0}}},
@@ -969,6 +1006,8 @@ export async function getSalesSummary(
 
   const invTotals = invoicesFacet?.totals?.[0] || {totalSalesPaise: 0, totalPaidPaise: 0, totalDuePaise: 0};
   const unpaidDue = invoicesFacet?.unpaidDue?.[0] || {count: 0, sum: 0};
+  const gstSales = invoicesFacet?.gstSales?.[0] || {count: 0, totalPaise: 0};
+  const nonGstSales = invoicesFacet?.nonGstSales?.[0] || {count: 0, totalPaise: 0};
 
   return {
     invoices: {
@@ -980,6 +1019,10 @@ export async function getSalesSummary(
       totalDuePaise: invTotals.totalDuePaise,
       unpaidCount: unpaidDue.count,
       unpaidDuePaise: unpaidDue.sum,
+      gstInvoiceCount: gstSales.count,
+      gstSalesPaise: gstSales.totalPaise,
+      nonGstInvoiceCount: nonGstSales.count,
+      nonGstSalesPaise: nonGstSales.totalPaise,
     },
     quotations: {
       draftCount: quotationsFacet?.draftCount?.[0]?.count ?? 0,

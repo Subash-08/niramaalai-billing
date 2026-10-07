@@ -1,6 +1,6 @@
 'use client';
 import {amountWords} from '@/lib/amount-words';
-import {useRef, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import Link from 'next/link';
 import {Copy, Pencil, Printer, ArrowUp, ArrowDown, Check, FileText, Plus, Phone, Mail, MapPin} from 'lucide-react';
 import {InvoiceTemplate, templateFields, extensionSeed} from '@/lib/extensions';
@@ -13,6 +13,38 @@ const invoiceDate = (value?: string) => {
   const [year, month, day] = value.split('-');
   return year && month && day ? `${day}/${month}/${year}` : value;
 };
+
+const isNonGstTemplate = (template: InvoiceTemplate) => /non[\s-]?gst/i.test(`${template.title || ''} ${template.name || ''}`);
+
+function buildNonGstTemplate(base: InvoiceTemplate): InvoiceTemplate {
+  const columns = structuredClone(base.columns).map(column => ({
+    ...column,
+    show: column.id === 'tax' ? false : column.show,
+    label: column.id === 'amount' ? 'Amount' : column.id === 'rateExcl' ? 'Rate' : column.label,
+  }));
+  const visible = columns.filter(column => column.show);
+  if (visible.every(column => column.width != null) && Math.abs(visible.reduce((sum, column) => sum + (column.width || 0), 0) - 100) > 1) {
+    columns.forEach(column => { column.width = undefined; });
+  }
+  return {
+    ...structuredClone(base),
+    id: '',
+    name: 'Preprinted Non-GST Invoice',
+    title: 'NON-GST INVOICE',
+    isDefault: false,
+    fields: {
+      ...base.fields,
+      shopGst: false,
+      customerGst: false,
+      reverseCharge: false,
+      supplyDate: false,
+      destination: false,
+      taxes: false,
+      taxSummary: false,
+    },
+    columns,
+  };
+}
 
 function ReferenceInvoice({bill, template, state, supplier, isLive}: {bill: Bill; template: InvoiceTemplate; state: any; supplier?: {name:string;address:string;phone:string;gst:string}; isLive:boolean}) {
   const f = template.fields || {};
@@ -30,7 +62,9 @@ function ReferenceInvoice({bill, template, state, supplier, isLive}: {bill: Bill
   const itemLines = f.packing ? bill.lines.filter(line => !packingLines.includes(line)) : bill.lines;
   const publicNumber = (bill as any).invoiceNumber || (bill as any).quotationNumber || bill.id;
   const automaticTitle = bill.kind === 'Quotation' ? 'QUOTATION' : isNonGst ? 'NON-GST INVOICE' : bill.kind === 'Service' ? (sum.tax > 0 ? 'SERVICE TAX INVOICE' : 'SERVICE INVOICE') : sum.tax > 0 ? 'TAX INVOICE' : 'CASH BILL';
-  const title = template.title || automaticTitle;
+  const title = isNonGst
+    ? (/non[\s-]?gst/i.test(template.title || '') ? template.title : 'NON-GST INVOICE')
+    : template.title || automaticTitle;
   const headerReserve = template.headerMode === 'hidden' ? 0 : template.topReserveMm;
   const footerReserve = template.footerMode === 'hidden' ? 0 : template.bottomReserveMm;
   const calibratedItemHeight = Math.max(24, template.itemAreaMinHeightMm
@@ -305,6 +339,16 @@ export default function Templates() {
   const [sampleId, setSampleId] = useState(state.bills[0]?.id || '');
   const [print, setPrint] = useState(false);
   const [saving, setSaving] = useState(false);
+  const creatingNonGstTemplate = useRef(false);
+
+  useEffect(() => {
+    if (editing || creatingNonGstTemplate.current || state.templates.length === 0 || state.templates.some(isNonGstTemplate)) return;
+    const base = state.templates.find(template => template.status !== 'Archived') || extensionSeed.templates[0];
+    creatingNonGstTemplate.current = true;
+    void saveTemplateApi(buildNonGstTemplate(base)).finally(() => {
+      creatingNonGstTemplate.current = false;
+    });
+  }, [editing, saveTemplateApi, state.templates]);
 
   const previewOnlySample: Bill = {
     id: 'PREVIEW-INV-0001', customerId: 'PREVIEW-CUSTOMER', date: '2026-09-18', due: '2026-09-18',
@@ -652,6 +696,7 @@ export default function Templates() {
                 <span>
                   {t.paper} · {t.orientation} · {t.columns.filter((c) => c.show).length} columns
                 </span>
+                <Badge>{isNonGstTemplate(t) ? 'Non-GST' : 'GST / General'}</Badge>
               </div>
               <div className="body-pad actions">
                 <Btn

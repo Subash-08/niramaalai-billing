@@ -12,6 +12,15 @@ export async function GET() {
     const tenantId = identity.tenantId;
     const today = todayInKolkata();
     const monthStart = today.slice(0, 7) + '-01';
+    const nonGstInvoiceExpression = {
+      $and: [
+        {$gt: [{$size: {$ifNull: ['$lines', []]}}, 0]},
+        {$eq: [
+          {$size: {$filter: {input: {$ifNull: ['$lines', []]}, as: 'line', cond: {$eq: ['$$line.taxTreatment', 'NonGST']}}}},
+          {$size: {$ifNull: ['$lines', []]}},
+        ]},
+      ],
+    };
 
     const [
       todaySalesAgg,
@@ -36,7 +45,17 @@ export async function GET() {
       // Month sales & GST
       col(db, 'invoices').aggregate([
         {$match: {tenantId, status: 'Issued', invoiceDate: {$gte: monthStart, $lte: today}}},
-        {$group: {_id: null, totalPaise: {$sum: '$totalPaise'}, taxPaise: {$sum: '$taxPaise'}, count: {$sum: 1}}},
+        {$set: {isNonGstInvoice: nonGstInvoiceExpression}},
+        {$group: {
+          _id: null,
+          totalPaise: {$sum: '$totalPaise'},
+          taxPaise: {$sum: '$taxPaise'},
+          count: {$sum: 1},
+          gstSalesPaise: {$sum: {$cond: ['$isNonGstInvoice', 0, '$totalPaise']}},
+          nonGstSalesPaise: {$sum: {$cond: ['$isNonGstInvoice', '$totalPaise', 0]}},
+          gstInvoiceCount: {$sum: {$cond: ['$isNonGstInvoice', 0, 1]}},
+          nonGstInvoiceCount: {$sum: {$cond: ['$isNonGstInvoice', 1, 0]}},
+        }},
       ]).toArray(),
 
       // Current invoice dues
@@ -134,6 +153,10 @@ export async function GET() {
         monthTotalPaise: monthSalesAgg[0]?.totalPaise || 0,
         monthGstPaise: monthSalesAgg[0]?.taxPaise || 0,
         monthCount: monthSalesAgg[0]?.count || 0,
+        monthGstSalesPaise: monthSalesAgg[0]?.gstSalesPaise || 0,
+        monthNonGstSalesPaise: monthSalesAgg[0]?.nonGstSalesPaise || 0,
+        monthGstInvoiceCount: monthSalesAgg[0]?.gstInvoiceCount || 0,
+        monthNonGstInvoiceCount: monthSalesAgg[0]?.nonGstInvoiceCount || 0,
       },
       dues: {
         totalCustomerOutstandingPaise,

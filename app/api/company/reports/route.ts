@@ -12,6 +12,9 @@ export async function GET(request: Request) {
     const reportType = url.searchParams.get('report') || 'Sales';
     const allowedReports = [
       'Sales',
+      'GST sales',
+      'Non-GST sales',
+      'GST / Non-GST sales',
       'Tax summary',
       'GST/Tax summary',
       'Service sales',
@@ -43,6 +46,8 @@ export async function GET(request: Request) {
 
     switch (reportType) {
       // 1. Sales Report (Without return credits)
+      case 'GST sales':
+      case 'Non-GST sales':
       case 'Sales': {
         const query: Record<string, any> = {
           tenantId,
@@ -52,7 +57,11 @@ export async function GET(request: Request) {
         if (customerId && customerId !== 'All customers') query.customerId = customerId;
         if (paymentStatus === 'Paid') query.duePaise = 0;
         if (paymentStatus === 'Unpaid / partial') query.duePaise = {$gt: 0};
-        if (category && category !== 'All categories') {
+        if (reportType === 'GST sales') {
+          query.lines = {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}};
+        } else if (reportType === 'Non-GST sales') {
+          query.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
+        } else if (category && category !== 'All categories') {
           if (category === 'Tax invoices') query['lines.taxBasisPoints'] = {$gt: 0};
           else if (category === 'Non-GST invoices') query.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
           else if (category === 'New goods') query.businessCategory = 'NewGoods';
@@ -89,6 +98,47 @@ export async function GET(request: Request) {
         return {
           headers: ['Invoice number', 'Date', 'Customer', 'Category', 'Taxable amount', 'GST', 'Total', 'Collected', 'Due'],
           rows,
+        };
+      }
+
+      case 'GST / Non-GST sales': {
+        const query: Record<string, any> = {
+          tenantId,
+          status: 'Issued',
+          invoiceDate: {$gte: from, $lte: to},
+        };
+        if (customerId && customerId !== 'All customers') query.customerId = customerId;
+        if (paymentStatus === 'Paid') query.duePaise = 0;
+        if (paymentStatus === 'Unpaid / partial') query.duePaise = {$gt: 0};
+
+        const invoices = await col(db, 'invoices').find(query).toArray();
+        const summary = {
+          GST: {count: 0, taxablePaise: 0, gstPaise: 0, salesPaise: 0, collectedPaise: 0, duePaise: 0},
+          'Non-GST': {count: 0, taxablePaise: 0, gstPaise: 0, salesPaise: 0, collectedPaise: 0, duePaise: 0},
+        };
+        for (const invoice of invoices) {
+          const lines = invoice.lines || [];
+          const type: keyof typeof summary = lines.length > 0 && lines.every((line: any) => line.taxTreatment === 'NonGST') ? 'Non-GST' : 'GST';
+          const target = summary[type];
+          target.count += 1;
+          target.taxablePaise += lines.reduce((sum: number, line: any) => sum + (line.taxableBasePaise || 0), 0);
+          target.gstPaise += lines.reduce((sum: number, line: any) => sum + (line.taxPaise || (line.cgstPaise || 0) + (line.sgstPaise || 0) + (line.igstPaise || 0)), 0);
+          target.salesPaise += invoice.totalPaise || 0;
+          target.collectedPaise += invoice.allocatedPaidPaise ?? ((invoice.allocatedReceiptPaise || 0) + (invoice.allocatedAdvancePaise || 0));
+          target.duePaise += invoice.duePaise || 0;
+        }
+
+        return {
+          headers: ['Invoice type', 'Invoice count', 'Taxable value', 'GST collected', 'Sales value', 'Collected', 'Due'],
+          rows: (['GST', 'Non-GST'] as const).map(type => [
+            `${type} invoices`,
+            summary[type].count,
+            summary[type].taxablePaise / 100,
+            summary[type].gstPaise / 100,
+            summary[type].salesPaise / 100,
+            summary[type].collectedPaise / 100,
+            summary[type].duePaise / 100,
+          ]),
         };
       }
 

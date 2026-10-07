@@ -10,6 +10,9 @@ import {PrintDialog} from './templates';
 
 const reportNames = [
   'Sales',
+  'GST sales',
+  'Non-GST sales',
+  'GST / Non-GST sales',
   'Tax summary',
   'Service sales',
   'Payments received',
@@ -93,14 +96,36 @@ export default function Reports() {
       b.date <= to &&
       (category === 'All categories' ||
         category === 'Tax invoices'
-        ? category !== 'Tax invoices' || b.lines.some((l) => l.tax > 0)
+        ? category !== 'Tax invoices' || !(b.lines.length > 0 && b.lines.every((l) => l.taxTreatment === 'NonGST'))
         : category === 'Non-GST invoices'
-        ? b.lines.every((l) => l.tax === 0)
+        ? b.lines.length > 0 && b.lines.every((l) => l.taxTreatment === 'NonGST')
         : b.category === category)
   );
+  const salesReportBills = bills.filter(bill => {
+    const isNonGst = bill.lines.length > 0 && bill.lines.every(line => line.taxTreatment === 'NonGST');
+    if (report === 'GST sales') return !isNonGst;
+    if (report === 'Non-GST sales') return isNonGst;
+    return true;
+  });
 
   const demoRows: (string | number)[][] =
-    report === 'Tax summary'
+    report === 'GST / Non-GST sales'
+      ? (['GST', 'Non-GST'] as const).map(type => {
+          const matching = bills.filter(bill => {
+            const isNonGst = bill.lines.length > 0 && bill.lines.every(line => line.taxTreatment === 'NonGST');
+            return type === 'Non-GST' ? isNonGst : !isNonGst;
+          });
+          return [
+            `${type} invoices`,
+            matching.length,
+            matching.reduce((sum, bill) => sum + totals(bill).base, 0),
+            matching.reduce((sum, bill) => sum + totals(bill).tax, 0),
+            matching.reduce((sum, bill) => sum + roundedTotal(bill), 0),
+            matching.reduce((sum, bill) => sum + paid(state, bill.id), 0),
+            matching.reduce((sum, bill) => sum + balance(state, bill), 0),
+          ];
+        })
+      : report === 'Tax summary'
       ? bills.map((b) => {
           const t = totals(b);
           return [b.id, b.date, b.taxMode || 'Intra-state', t.base, t.cgst, t.sgst, t.igst, t.total];
@@ -123,7 +148,7 @@ export default function Reports() {
           .map((b) => [b.id, state.customers.find((c) => c.id === b.customerId)?.name || '', b.date, b.due || b.date, balance(state, b)])
       : report === 'Product catalogue'
       ? state.products.map(p => [p.id, p.name, p.category, p.description || '', p.unit || 'Piece', p.hsn || '', p.price, `${p.tax || 0}%`, p.status || 'Active'])
-      : bills.map((b) => {
+      : salesReportBills.map((b) => {
           const t = totals(b);
           return [
             b.id,
@@ -139,7 +164,9 @@ export default function Reports() {
         });
 
   const demoHeaders =
-    report === 'Tax summary'
+    report === 'GST / Non-GST sales'
+      ? ['Invoice type', 'Invoice count', 'Taxable value', 'GST collected', 'Sales value', 'Collected', 'Due']
+      : report === 'Tax summary'
       ? ['Invoice', 'Date', 'Supply type', 'Taxable value', 'CGST', 'SGST', 'IGST', 'Total']
       : report === 'Service sales'
       ? ['Invoice', 'Date', 'Customer', 'Service description', 'Quantity', 'Unit', 'Amount']
@@ -161,6 +188,8 @@ export default function Reports() {
   // Summaries use the very same filtered rows as the table and exports.
   const summaryColumns: Record<string, number[]> = {
     Sales: [4, 5, 6, 7, 8],
+    'GST sales': [4, 5, 6, 7, 8],
+    'Non-GST sales': [4, 5, 6, 7, 8],
     'Tax summary': [3, 4, 5, 6, 7],
     'Service sales': [4, 6],
     'Payments received': [7],
@@ -169,10 +198,18 @@ export default function Reports() {
     'Customer dues': [4],
     'Product catalogue': [6],
   };
-  const summaryCards = (summaryColumns[report] || []).map(index => ({
-    label: headers[index], count: false,
-    value: rows.reduce((n, row) => n + (typeof row[index] === 'number' ? Math.round((row[index] as number) * 100) : 0), 0) / 100,
-  }));
+  const summaryCards = report === 'GST / Non-GST sales'
+    ? [
+        {label: 'Invoice count', count: true, value: rows.reduce((sum, row) => sum + Number(row[1] || 0), 0)},
+        ...[2, 3, 4, 5, 6].map(index => ({
+          label: headers[index], count: false,
+          value: rows.reduce((sum, row) => sum + (typeof row[index] === 'number' ? Math.round((row[index] as number) * 100) : 0), 0) / 100,
+        })),
+      ]
+    : (summaryColumns[report] || []).map(index => ({
+        label: headers[index], count: false,
+        value: rows.reduce((n, row) => n + (typeof row[index] === 'number' ? Math.round((row[index] as number) * 100) : 0), 0) / 100,
+      }));
 
 
   function preset(days: number) {
@@ -190,6 +227,7 @@ export default function Reports() {
       if (isLive) {
         const status = paymentStatus === 'Paid' ? 'Paid' : paymentStatus === 'Unpaid / partial' ? 'Unpaid' : 'Issued';
         const businessCategory = category === 'New goods' ? 'NewGoods' : category === 'Used goods' ? 'UsedGoods' : category === 'Service' ? 'Service' : undefined;
+        const taxType = category === 'Tax invoices' ? 'GST' : category === 'Non-GST invoices' ? 'NonGST' : undefined;
         const result = await fetchInvoicesPage({
           page: 1,
           limit: 100,
@@ -198,6 +236,7 @@ export default function Reports() {
           dateTo: to,
           customerId: customer !== 'All customers' ? customer : undefined,
           businessCategory,
+          taxType,
         });
         if (result.total > 100) throw new Error(`The filters match ${result.total} invoices. Narrow the period to 100 or fewer invoices.`);
         if (!result.records.length) throw new Error('No issued invoices match these filters.');
@@ -247,6 +286,7 @@ export default function Reports() {
               onClick={() => {
                 setReport(r);
                 setSelected([]);
+                if (['GST sales', 'Non-GST sales', 'GST / Non-GST sales'].includes(r)) setCategory('All categories');
               }}
             >
               <BarChart3 size={15} />
@@ -296,7 +336,7 @@ export default function Reports() {
                 />
               </Field>
 
-              {['Sales', 'Service sales', 'Invoice exports', 'Tax summary', 'Customer outstanding', 'Customer dues', 'Payments received'].includes(report) && (
+              {['Sales', 'GST sales', 'Non-GST sales', 'GST / Non-GST sales', 'Service sales', 'Invoice exports', 'Tax summary', 'Customer outstanding', 'Customer dues', 'Payments received'].includes(report) && (
                 <Field label="Customer">
                   <select
                     value={customer}
@@ -317,7 +357,7 @@ export default function Reports() {
 
 
 
-              {['Sales', 'Invoice exports'].includes(report) && (
+              {['Sales', 'GST sales', 'Non-GST sales', 'GST / Non-GST sales', 'Invoice exports'].includes(report) && (
                 <Field label="Payment status">
                   <select
                     value={paymentStatus}

@@ -149,7 +149,7 @@ type Store = {
   saveInvoiceDraftApi: (inv: any, existingId?: string, version?: number) => Promise<{success: boolean; draft?: any; error?: string}>;
   cancelInvoiceDraftApi: (id: string, version?: number, reason?: string) => Promise<{success: boolean; error?: string}>;
   issueInvoiceApi: (id: string, payload: any) => Promise<{success: boolean; invoice?: any; error?: string}>;
-  fetchInvoicesPage: (query?: {page?: number; limit?: number; customerId?: string; status?: string; search?: string; businessCategory?: string; dateFrom?: string; dateTo?: string; hasDue?: boolean}) => Promise<PaginationResult<Bill>>;
+  fetchInvoicesPage: (query?: {page?: number; limit?: number; customerId?: string; status?: string; search?: string; businessCategory?: string; taxType?: 'GST' | 'NonGST'; dateFrom?: string; dateTo?: string; hasDue?: boolean}) => Promise<PaginationResult<Bill>>;
   fetchInvoiceDetailApi: (id: string) => Promise<{invoice: any}>;
 
   fetchReservationsPage: (query?: {page?: number; limit?: number; customerId?: string; productId?: string; status?: string; search?: string; dateFrom?: string; dateTo?: string}) => Promise<PaginationResult<Reservation>>;
@@ -300,6 +300,13 @@ export function StoreProvider({children}: {children: ReactNode}) {
           invoicePrefix: boot.company.invoicePrefix || 'INV',
           serviceInvoicePrefix: boot.company.serviceInvoicePrefix || 'SRV',
           invoiceStartNumber: boot.company.invoiceStartNumber || 1,
+          gstInvoiceNumberLabel: boot.company.gstInvoiceNumberLabel || boot.company.invoiceNumberLabel || 'GST Invoice No',
+          nonGstInvoiceNumberLabel: boot.company.nonGstInvoiceNumberLabel || 'Non-GST Invoice No',
+          gstInvoicePrefix: boot.company.gstInvoicePrefix || boot.company.invoicePrefix || 'INV',
+          nonGstInvoicePrefix: boot.company.nonGstInvoicePrefix || 'NGST',
+          gstInvoiceStartNumber: boot.company.gstInvoiceStartNumber || boot.company.invoiceStartNumber || 1,
+          nonGstInvoiceStartNumber: boot.company.nonGstInvoiceStartNumber || 1,
+          invoiceNumberingMode: boot.company.invoiceNumberingMode === 'shared' ? 'shared' : 'separate',
           invoiceNumberPadding: boot.company.invoiceNumberPadding ?? 4,
           invoiceIncludeFinancialYear: boot.company.invoiceIncludeFinancialYear !== false,
           invoiceNumberSeparator: boot.company.invoiceNumberSeparator ?? '-',
@@ -402,6 +409,13 @@ export function StoreProvider({children}: {children: ReactNode}) {
         invoicePrefix: f.invoicePrefix || 'INV',
         serviceInvoicePrefix: f.serviceInvoicePrefix || 'SRV',
         invoiceStartNumber: Number(f.invoiceStartNumber || 1),
+        gstInvoiceNumberLabel: f.gstInvoiceNumberLabel || f.invoiceNumberLabel || 'GST Invoice No',
+        nonGstInvoiceNumberLabel: f.nonGstInvoiceNumberLabel || 'Non-GST Invoice No',
+        gstInvoicePrefix: f.gstInvoicePrefix || f.invoicePrefix || 'INV',
+        nonGstInvoicePrefix: f.nonGstInvoicePrefix || 'NGST',
+        gstInvoiceStartNumber: Number(f.gstInvoiceStartNumber || f.invoiceStartNumber || 1),
+        nonGstInvoiceStartNumber: Number(f.nonGstInvoiceStartNumber || 1),
+        invoiceNumberingMode: f.invoiceNumberingMode === 'shared' ? 'shared' : 'separate',
         invoiceNumberPadding: Number(f.invoiceNumberPadding ?? 4),
         invoiceIncludeFinancialYear: f.invoiceIncludeFinancialYear !== false,
         invoiceNumberSeparator: f.invoiceNumberSeparator ?? '-',
@@ -1949,6 +1963,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
     status?: string;
     search?: string;
     businessCategory?: string;
+    taxType?: 'GST' | 'NonGST';
     dateFrom?: string;
     dateTo?: string;
     hasDue?: boolean;
@@ -1960,6 +1975,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
     if (query.status && query.status !== 'All') p.set('status', query.status);
     if (query.search) p.set('q', query.search);
     if (query.businessCategory) p.set('businessCategory', query.businessCategory);
+    if (query.taxType) p.set('taxType', query.taxType);
     if (query.dateFrom) p.set('dateFrom', query.dateFrom);
     if (query.dateTo) p.set('dateTo', query.dateTo);
     if (query.hasDue) p.set('hasDue', 'true');

@@ -107,6 +107,7 @@ export function DocumentComposer({
   const params = useSearchParams();
 
   const editId = params.get('edit') || (existingId && existingId !== 'new' ? existingId : undefined);
+  const requestedNonGst = !editId && !params.get('from') && params.get('taxType') === 'non-gst';
   const [activeDraftId, setActiveDraftId] = useState<string | undefined>(editId);
   const isEditMode = !!editId;
   const isReceiptMode = purchase && !!existingId && existingId !== 'new';
@@ -173,7 +174,7 @@ export function DocumentComposer({
   const [inclusive, setInclusive] = useState(existing?.inclusive ?? source?.inclusive ?? true);
   const [nonGst, setNonGst] = useState(() => {
     const initialLines = existing?.lines || source?.lines || [];
-    return initialLines.length > 0 && initialLines.every((line: any) => line.taxTreatment === 'NonGST');
+    return requestedNonGst || (initialLines.length > 0 && initialLines.every((line: any) => line.taxTreatment === 'NonGST'));
   });
   const [notes, setNotes] = useState(existing?.notes || source?.notes || '');
   const [category, setCategory] = useState<Bill['category']>('New goods');
@@ -196,16 +197,19 @@ export function DocumentComposer({
   const [newProduct, setNewProduct] = useState(false);
   const [serviceId, setServiceId] = useState('');
   const [payRows, setPayRows] = useState<{ account: string; amount: string; method: string }[]>([]);
-  const [templateId, setTemplateId] = useState(source?.templateId || state.defaultTemplateId);
+  const nonGstTemplate = state.templates.find((template) =>
+    /non[\s-]?gst/i.test(`${template.title || ''} ${template.name || ''}`)
+  );
+  const [templateId, setTemplateId] = useState(source?.templateId || (requestedNonGst ? nonGstTemplate?.id : '') || state.defaultTemplateId);
   const [printJobId, setPrintJobId] = useState(params.get('printJob') || (existing as any)?.printJobId || (source as any)?.printJobId || (existing as any)?.jobId || (source as any)?.jobId || '');
   const templateChosenByUser = useRef(false);
   useEffect(() => {
     // Initial demo state may render before live bootstrap completes. Only an
     // implicit selection follows the live default; explicit choices never switch.
     if (!templateChosenByUser.current && !source?.templateId && !params.get('edit') && !params.get('from')) {
-      setTemplateId(state.defaultTemplateId || '');
+      setTemplateId((requestedNonGst ? nonGstTemplate?.id : '') || state.defaultTemplateId || '');
     }
-  }, [isLive, state.defaultTemplateId, source?.templateId, params]);
+  }, [isLive, state.defaultTemplateId, source?.templateId, params, requestedNonGst, nonGstTemplate?.id]);
   const [shipSeparate, setShipSeparate] = useState(!!source?.shipTo);
   const [shipTo, setShipTo] = useState(
     source?.shipTo || { name: '', address: '', phone: '', state: 'Tamil Nadu', postalCode: '' }
@@ -274,7 +278,7 @@ export function DocumentComposer({
     category,
     status: quotation ? 'Draft' : 'Issued',
     lines,
-    inclusive,
+    inclusive: nonGst ? false : inclusive,
     taxMode,
     placeOfSupply,
     notes,
@@ -543,7 +547,7 @@ export function DocumentComposer({
           ]);
           notify('Loaded print job details. Set the price and issue the invoice.');
         })
-        .catch(() => {});
+        .catch(() => { });
     } else if (isLive && !purchase && params.get('job') && !isEditMode) {
       const jobId = params.get('job')!;
       fetch(`/api/services/${encodeURIComponent(jobId)}`)
@@ -597,19 +601,19 @@ export function DocumentComposer({
     setNonGst(nextNonGst);
     if (nextNonGst) {
       setInclusive(false);
-      setLines((current) => current.map((line) => ({...line, inclusive: false, taxTreatment: 'NonGST', tax: 0})));
+      setLines((current) => current.map((line) => ({ ...line, inclusive: false, taxTreatment: 'NonGST', tax: 0 })));
       return;
     }
     setLines((current) => current.map((line) => {
       const productTax = state.products.find((product) => product.id === line.productId)?.tax;
       const serviceTax = state.serviceCatalog.find((item: any) => item.id === line.serviceId)?.tax;
-      return {...line, inclusive: line.inclusive ?? inclusive, taxTreatment: 'Taxable', tax: line.tax || serviceTax || productTax || 18};
+      return { ...line, inclusive: line.inclusive ?? inclusive, taxTreatment: 'Taxable', tax: line.tax || serviceTax || productTax || 18 };
     }));
   }
 
   function updatePrintSpecification(i: number, key: string, value: string) {
     setLines((current) => current.map((line, index) => index === i
-      ? {...line, printSpecifications: {...(line.printSpecifications || {}), [key]: value}}
+      ? { ...line, printSpecifications: { ...(line.printSpecifications || {}), [key]: value } }
       : line));
   }
 
@@ -1056,7 +1060,7 @@ export function DocumentComposer({
           businessCategory: (category === 'Used goods' ? 'UsedGoods' : category === 'Service' ? 'Service' : 'NewGoods') as any,
           quotationDate: date,
           validUntil: due >= date ? due : date,
-          inclusive: !!inclusive,
+          inclusive: nonGst ? false : !!inclusive,
           taxMode,
           placeOfSupply,
           billTo,
@@ -1089,7 +1093,7 @@ export function DocumentComposer({
         businessCategory: 'NewGoods' as const,
         invoiceDate: date,
         dueDate: due >= date ? due : date,
-        inclusive: !!inclusive,
+        inclusive: nonGst ? false : !!inclusive,
         taxMode,
         placeOfSupply,
         billTo,
@@ -1189,16 +1193,20 @@ export function DocumentComposer({
               ? 'New purchase'
               : quotation
                 ? 'New quotation'
-                : service
-                  ? 'New service invoice'
-                  : 'New sales invoice'
+                : nonGst
+                  ? 'New Non-GST invoice'
+                  : service
+                    ? 'New service invoice'
+                    : 'New sales invoice'
         }
         description={
           purchase
             ? (isReceiptMode ? 'Receive delivered goods into inventory. No money leaves Cash or Bank. Pay the supplier later from this purchase or the supplier profile.' : 'Record a supplier bill and receive goods without payment, or choose Record + Receive + Pay to pay now.')
             : quotation
               ? 'Prepare an estimate. Stock and money stay unchanged until a sale is confirmed.'
-              : 'Add items, check the totals and issue the customer’s invoice.'
+              : nonGst
+                ? 'Create a sale without GST. Entered rates are final and the dedicated Non-GST template is selected automatically.'
+                : 'Add items, check the totals and issue the customer’s invoice.'
         }
         actions={
           <>
@@ -1407,10 +1415,11 @@ export function DocumentComposer({
             )}
 
             {!purchase && <Field label="Invoice tax type">
-              <select value={nonGst ? 'non-gst' : 'gst'} onChange={(e) => setTaxDocumentMode(e.target.value === 'non-gst')}>
+              <select disabled={requestedNonGst} value={nonGst ? 'non-gst' : 'gst'} onChange={(e) => setTaxDocumentMode(e.target.value === 'non-gst')}>
                 <option value="gst">GST invoice</option>
                 <option value="non-gst">Non-GST invoice</option>
               </select>
+              {requestedNonGst && <span className="muted">This invoice was started from the dedicated Non-GST action. Use New invoice when GST is required.</span>}
             </Field>}
 
             {!nonGst && <Field label="GST supply type">
@@ -1492,7 +1501,7 @@ export function DocumentComposer({
                     <input
                       value={(billTo as any)[k] || ''}
                       onChange={(e) => {
-                        const next = {...billTo, [k]: e.target.value};
+                        const next = { ...billTo, [k]: e.target.value };
                         setBillTo(next);
                         if (k === 'state' && !shipSeparate) setPlaceOfSupply(e.target.value);
                       }}
@@ -1578,7 +1587,7 @@ export function DocumentComposer({
             </div>
           )}
           {purchase && (
-            <p className="muted body-pad" style={{paddingTop: 0, paddingBottom: '0.5rem'}}>
+            <p className="muted body-pad" style={{ paddingTop: 0, paddingBottom: '0.5rem' }}>
               The product’s saved cost is only a starting value. Edit the rate on this purchase when the supplier price changes; the received lot keeps that exact historical cost while the product remains the same item.
             </p>
           )}
@@ -1680,9 +1689,9 @@ export function DocumentComposer({
                           <summary>Print specifications</summary>
                           <div className="line-spec-grid">
                             {[
-                              ['size','Size'],['material','Paper / material'],['gsm','GSM'],['colour','Colour'],
-                              ['sides','Printing sides'],['finishing','Finishing'],['deliveryDate','Delivery date'],['notes','Specification notes'],
-                            ].map(([key,label]) => <input key={key} type={key==='deliveryDate'?'date':'text'} aria-label={`${label} for item ${i+1}`} placeholder={label} value={(l.printSpecifications as any)?.[key] || ''} onChange={(e)=>updatePrintSpecification(i,key,e.target.value)} />)}
+                              ['size', 'Size'], ['material', 'Paper / material'], ['gsm', 'GSM'], ['colour', 'Colour'],
+                              ['sides', 'Printing sides'], ['finishing', 'Finishing'], ['deliveryDate', 'Delivery date'], ['notes', 'Specification notes'],
+                            ].map(([key, label]) => <input key={key} type={key === 'deliveryDate' ? 'date' : 'text'} aria-label={`${label} for item ${i + 1}`} placeholder={label} value={(l.printSpecifications as any)?.[key] || ''} onChange={(e) => updatePrintSpecification(i, key, e.target.value)} />)}
                           </div>
                         </details>
                       )}
@@ -1698,8 +1707,8 @@ export function DocumentComposer({
                         value={l.qty}
                         onChange={(e) => update(i, 'qty', +e.target.value)}
                       />
-                      <select aria-label={`Item ${i + 1} unit`} value={l.unit || (l.lineType === 'Service' ? 'Job' : 'Piece')} onChange={(e)=>update(i,'unit',e.target.value)}>
-                        {['Piece','Sheet','Page','Set','Book','Box','Square foot','Roll','Pack','Job'].map(unit=><option key={unit}>{unit}</option>)}
+                      <select aria-label={`Item ${i + 1} unit`} value={l.unit || (l.lineType === 'Service' ? 'Job' : 'Piece')} onChange={(e) => update(i, 'unit', e.target.value)}>
+                        {['Piece', 'Sheet', 'Page', 'Set', 'Book', 'Box', 'Square foot', 'Roll', 'Pack', 'Job'].map(unit => <option key={unit}>{unit}</option>)}
                       </select>
                     </td>
                     <td>
@@ -2319,6 +2328,10 @@ export default function Documents({
   const [cancel, setCancel] = useState(false);
   const [print, setPrint] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState(() => searchParams?.get('category') || 'All categories');
+  const [taxTypeFilter, setTaxTypeFilter] = useState<'All' | 'GST' | 'NonGST'>(() => {
+    const value = searchParams?.get('taxType');
+    return value === 'GST' || value === 'NonGST' ? value : 'All';
+  });
   const [purchasePage, setPurchasePage] = useState(() => Math.max(1, parseInt(searchParams?.get('page') || '1', 10)));
   const [quotationPage, setQuotationPage] = useState(1);
   const [quotationPageData, setQuotationPageData] = useState<{ records: Bill[]; total: number; totalPages: number } | null>(null);
@@ -2364,11 +2377,12 @@ export default function Documents({
     if (q.trim()) url.searchParams.set('q', q.trim()); else url.searchParams.delete('q');
     if (status !== 'All') url.searchParams.set('status', status); else url.searchParams.delete('status');
     if (categoryFilter !== 'All categories') url.searchParams.set('category', categoryFilter); else url.searchParams.delete('category');
+    if (taxTypeFilter !== 'All') url.searchParams.set('taxType', taxTypeFilter); else url.searchParams.delete('taxType');
     if (dateFrom) url.searchParams.set('dateFrom', dateFrom); else url.searchParams.delete('dateFrom');
     if (dateTo) url.searchParams.set('dateTo', dateTo); else url.searchParams.delete('dateTo');
     if (invoicePage > 1) url.searchParams.set('page', String(invoicePage)); else url.searchParams.delete('page');
     window.history.replaceState(null, '', url.pathname + url.search);
-  }, [purchase, quotation, id, q, status, categoryFilter, dateFrom, dateTo, invoicePage]);
+  }, [purchase, quotation, id, q, status, categoryFilter, taxTypeFilter, dateFrom, dateTo, invoicePage]);
 
   // Detail view state
   const [detailData, setDetailData] = useState<any>(null);
@@ -2376,7 +2390,7 @@ export default function Documents({
   const [detailError, setDetailError] = useState('');
   const detailRequestRef = useRef(0);
   const [quotationSharing, setQuotationSharing] = useState(false);
-  const quotationShareAttempt = useRef<{fingerprint: string; key: string} | null>(null);
+  const quotationShareAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
   const [detailTab, setDetailTab] = useState<'Overview' | 'Receipts' | 'Payments' | 'Returns' | 'Credit notes'>('Overview');
   const [reversalModal, setReversalModal] = useState<{
     open: boolean;
@@ -2580,6 +2594,7 @@ export default function Documents({
         if (status !== 'All') query.set('status', status);
         if (status === 'Unpaid') query.set('hasDue', 'true');
         if (salesCategoryValue) query.set('businessCategory', salesCategoryValue);
+        if (taxTypeFilter !== 'All') query.set('taxType', taxTypeFilter);
         if (dateFrom) query.set('dateFrom', dateFrom);
         if (dateTo) query.set('dateTo', dateTo);
       }
@@ -2590,7 +2605,7 @@ export default function Documents({
         })
         .catch(() => { });
     }
-  }, [purchase, quotation, id, isLive, deferredQ, status, salesCategoryValue, dateFrom, dateTo]);
+  }, [purchase, quotation, id, isLive, deferredQ, status, salesCategoryValue, taxTypeFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     if (!purchase || id || !isLive) return;
@@ -2635,12 +2650,13 @@ export default function Documents({
       status: status === 'All' ? undefined : status,
       hasDue: status === 'Unpaid' ? true : undefined,
       businessCategory: salesCategoryValue,
+      taxType: taxTypeFilter === 'All' ? undefined : taxTypeFilter,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
     }).then(setInvoicePageData).catch(() => notify('Could not load invoices.')).finally(() => setInvoiceListLoading(false));
-  }, [quotation, purchase, id, isLive, invoicePage, deferredQ, status, categoryFilter, dateFrom, dateTo, fetchInvoicesPage, notify]);
+  }, [quotation, purchase, id, isLive, invoicePage, deferredQ, status, categoryFilter, taxTypeFilter, dateFrom, dateTo, fetchInvoicesPage, notify]);
 
-  useEffect(() => { setInvoicePage(1); }, [deferredQ, status, categoryFilter, dateFrom, dateTo]);
+  useEffect(() => { setInvoicePage(1); }, [deferredQ, status, categoryFilter, taxTypeFilter, dateFrom, dateTo]);
 
   const list = (
     purchase
@@ -2658,6 +2674,8 @@ export default function Documents({
       ? (!date || b.date === date)
       : (!dateFrom || b.date >= dateFrom) && (!dateTo || b.date <= dateTo);
     const matchCat = purchase || quotation || categoryFilter === 'All categories' || (b as Bill).category === categoryFilter;
+    const isNonGstInvoice = !purchase && !quotation && (b as Bill).lines.length > 0 && (b as Bill).lines.every(line => line.taxTreatment === 'NonGST');
+    const matchTaxType = purchase || quotation || taxTypeFilter === 'All' || (taxTypeFilter === 'NonGST' ? isNonGstInvoice : !isNonGstInvoice);
 
     if (purchase) {
       const pur = b as Purchase;
@@ -2674,7 +2692,7 @@ export default function Documents({
       (status === 'Unpaid' && balance(state, b) > 0) ||
       (status === 'Paid' && balance(state, b) === 0);
 
-    return matchSearch && matchDate && matchCat && matchStatus;
+    return matchSearch && matchDate && matchCat && matchTaxType && matchStatus;
   });
 
   const path = '/sales';
@@ -2703,6 +2721,7 @@ export default function Documents({
     if (status !== 'All') query.set('status', status);
     if (status === 'Unpaid') query.set('hasDue', 'true');
     if (salesCategoryValue) query.set('businessCategory', salesCategoryValue);
+    if (taxTypeFilter !== 'All') query.set('taxType', taxTypeFilter);
     if (dateFrom) query.set('dateFrom', dateFrom);
     if (dateTo) query.set('dateTo', dateTo);
     return `/api/sales/invoices/export?${query.toString()}`;
@@ -2755,6 +2774,7 @@ export default function Documents({
         status: status === 'All' ? undefined : status,
         hasDue: status === 'Unpaid' ? true : undefined,
         businessCategory: salesCategoryValue,
+        taxType: taxTypeFilter === 'All' ? undefined : taxTypeFilter,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
       });
@@ -2835,10 +2855,10 @@ export default function Documents({
       <PageHead
         title={record
           ? (purchase
-              ? ((record as Purchase).purchaseNumber || record.id)
-              : quotation
-                ? ((record as any).quotationNumber || record.id)
-                : ((record as any).invoiceNumber || record.id))
+            ? ((record as Purchase).purchaseNumber || record.id)
+            : quotation
+              ? ((record as any).quotationNumber || record.id)
+              : ((record as any).invoiceNumber || record.id))
           : (purchase ? 'Purchases' : quotation ? 'Quotations' : 'Sales & invoices')}
         description={
           record
@@ -2978,6 +2998,11 @@ export default function Documents({
                   Service invoice
                 </Link>
               )}
+              {!quotation && !purchase && (
+                <Link className="btn secondary" href="/sales/new?taxType=non-gst">
+                  Non-GST invoice
+                </Link>
+              )}
               <Link href={path + '/new'} className="btn">
                 <Plus size={16} />
                 New invoice
@@ -3071,7 +3096,7 @@ export default function Documents({
             </Card>
           </div>
         ) : (
-          <div className="summary-dashboard" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+          <div className="summary-dashboard sales-summary-dashboard" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
             <Card title="Draft invoices">
               <div className="body-pad" role="button" tabIndex={0} onClick={() => setStatus('Draft')}>
                 <h2>{salesSummary?.invoices?.draftCount ?? list.filter((b) => b.status === 'Draft').length}</h2>
@@ -3088,6 +3113,18 @@ export default function Documents({
               <div className="body-pad">
                 <h2>{money(salesSummary?.invoices?.totalSalesPaise != null ? salesSummary.invoices.totalSalesPaise / 100 : list.reduce((n, b) => n + roundedTotal(b), 0))}</h2>
                 <p>Total bill value</p>
+              </div>
+            </Card>
+            <Card title="GST invoice sales">
+              <div className="body-pad">
+                <h2>{money(salesSummary?.invoices?.gstSalesPaise != null ? salesSummary.invoices.gstSalesPaise / 100 : list.filter((b) => !(b.lines.length > 0 && b.lines.every((line) => line.taxTreatment === 'NonGST'))).reduce((n, b) => n + roundedTotal(b), 0))}</h2>
+                <p>{salesSummary?.invoices?.gstInvoiceCount ?? list.filter((b) => !(b.lines.length > 0 && b.lines.every((line) => line.taxTreatment === 'NonGST'))).length} issued GST invoices</p>
+              </div>
+            </Card>
+            <Card title="Non-GST sales">
+              <div className="body-pad">
+                <h2>{money(salesSummary?.invoices?.nonGstSalesPaise != null ? salesSummary.invoices.nonGstSalesPaise / 100 : list.filter((b) => b.lines.length > 0 && b.lines.every((line) => line.taxTreatment === 'NonGST')).reduce((n, b) => n + roundedTotal(b), 0))}</h2>
+                <p>{salesSummary?.invoices?.nonGstInvoiceCount ?? list.filter((b) => b.lines.length > 0 && b.lines.every((line) => line.taxTreatment === 'NonGST')).length} issued Non-GST invoices</p>
               </div>
             </Card>
             <Card title="Payments collected">
@@ -3144,14 +3181,14 @@ export default function Documents({
                   {(record as any).paymentStatus === 'PartlyPaid'
                     ? 'Partly paid'
                     : (record as any).paymentStatus === 'Paid'
-                    ? 'Paid'
-                    : (record as any).paymentStatus === 'Unpaid'
-                      ? 'Unpaid'
-                      : (isLive && (record as any).dueAmount != null ? (record as any).dueAmount === 0 : balance(state, record) === 0)
-                        ? 'Paid'
-                        : (isLive && (record as any).paidAmount != null ? (record as any).paidAmount > 0 : paid(state, record.id) > 0)
-                          ? 'Partly paid'
-                          : 'Unpaid'}
+                      ? 'Paid'
+                      : (record as any).paymentStatus === 'Unpaid'
+                        ? 'Unpaid'
+                        : (isLive && (record as any).dueAmount != null ? (record as any).dueAmount === 0 : balance(state, record) === 0)
+                          ? 'Paid'
+                          : (isLive && (record as any).paidAmount != null ? (record as any).paidAmount > 0 : paid(state, record.id) > 0)
+                            ? 'Partly paid'
+                            : 'Unpaid'}
                 </Badge>
               </>
             )}
@@ -3531,12 +3568,12 @@ export default function Documents({
                   <tbody>
                     {(detailData?.receipts?.length
                       ? detailData.receipts.map((receipt: any) => ({
-                          id: receipt._id || receipt.id,
-                          date: receipt.date,
-                          account: receipt.components?.[0]?.account || 'Cash',
-                          purpose: `${receipt.receiptNumber || 'Receipt'} · ${receipt.components?.[0]?.method || 'Cash'}`,
-                          amount: (receipt.totalAmountPaise || 0) / 100,
-                        }))
+                        id: receipt._id || receipt.id,
+                        date: receipt.date,
+                        account: receipt.components?.[0]?.account || 'Cash',
+                        purpose: `${receipt.receiptNumber || 'Receipt'} · ${receipt.components?.[0]?.method || 'Cash'}`,
+                        amount: (receipt.totalAmountPaise || 0) / 100,
+                      }))
                       : state.payments.filter((p) => p.reference === record.id)
                     ).map((p: any) => (
                       <tr key={p.id}>
@@ -3571,246 +3608,260 @@ export default function Documents({
         </>
       ) : (
         <>
-        {!quotation && !purchase && (
-          <div className="tabs" aria-label="Invoice views" style={{marginBottom: '1rem'}}>
-            <button type="button" className={status !== 'Unpaid' ? 'active' : ''} onClick={() => setStatus('All')}>All invoices</button>
-            <button type="button" className={status === 'Unpaid' ? 'active' : ''} onClick={() => setStatus('Unpaid')}>Outstanding</button>
-          </div>
-        )}
-        <Card>
-          {!quotation && !purchase && status === 'Unpaid' && (
-            <div className="body-pad notice" style={{margin: 12}}><strong>Outstanding invoices</strong> — only issued invoices with a balance due are shown.</div>
+          {!quotation && !purchase && (
+            <div className="tabs" aria-label="Invoice views" style={{ marginBottom: '1rem' }}>
+              <button type="button" className={status !== 'Unpaid' ? 'active' : ''} onClick={() => setStatus('All')}>All invoices</button>
+              <button type="button" className={status === 'Unpaid' ? 'active' : ''} onClick={() => setStatus('Unpaid')}>Outstanding</button>
+            </div>
           )}
-          <div className="toolbar" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
-            <SearchBox value={q} onChange={setQ} placeholder="Search document or customer…" />
+          <Card>
+            {!quotation && !purchase && status === 'Unpaid' && (
+              <div className="body-pad notice" style={{ margin: 12 }}><strong>Outstanding invoices</strong> — only issued invoices with a balance due are shown.</div>
+            )}
+            <div className={`toolbar ${!purchase && !quotation ? 'sales-filter-toolbar' : ''}`} style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+              <SearchBox value={q} onChange={setQ} placeholder="Search document or customer…" />
 
-            {purchase ? (
-              <>
+              {purchase ? (
+                <>
+                  <select
+                    aria-label="Document status"
+                    value={docStatusFilter}
+                    onChange={(e) => setDocStatusFilter(e.target.value)}
+                  >
+                    <option value="All">All doc states</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Confirmed">Confirmed</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+
+                  <select
+                    aria-label="Bill status"
+                    value={billStatusFilter}
+                    onChange={(e) => setBillStatusFilter(e.target.value)}
+                  >
+                    <option value="All">All bill states</option>
+                    <option value="NotPosted">Not posted</option>
+                    <option value="Posted">Posted</option>
+                  </select>
+
+                  <select
+                    aria-label="Receipt status"
+                    value={receiptStatusFilter}
+                    onChange={(e) => setReceiptStatusFilter(e.target.value)}
+                  >
+                    <option value="All">All receipt states</option>
+                    <option value="NotReceived">Not received</option>
+                    <option value="PartlyReceived">Partly received</option>
+                    <option value="Received">Received</option>
+                    <option value="ClosedPartlyReceived">Closed partly received</option>
+                  </select>
+
+                  <select
+                    aria-label="Payment status"
+                    value={paymentStatusFilter}
+                    onChange={(e) => setPaymentStatusFilter(e.target.value)}
+                  >
+                    <option value="All">All payment states</option>
+                    <option value="Unpaid">Unpaid</option>
+                    <option value="PartlyPaid">Partly paid</option>
+                    <option value="Paid">Paid</option>
+                  </select>
+                </>
+              ) : (
                 <select
                   aria-label="Document status"
-                  value={docStatusFilter}
-                  onChange={(e) => setDocStatusFilter(e.target.value)}
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
                 >
-                  <option value="All">All doc states</option>
-                  <option value="Draft">Draft</option>
-                  <option value="Confirmed">Confirmed</option>
-                  <option value="Cancelled">Cancelled</option>
+                  <option value="All">All statuses</option>
+                  {(quotation
+                    ? ['Draft', 'Shared', 'Converted', 'Expired', 'Cancelled']
+                    : ['Draft', 'Issued', 'Paid', 'PartlyPaid', 'Unpaid', 'Cancelled']
+                  ).map((s) => (
+                    <option key={s} value={s}>{s === 'Unpaid' ? 'Outstanding' : s === 'PartlyPaid' ? 'Partly paid' : s}</option>
+                  ))}
                 </select>
+              )}
 
+              {!purchase && !quotation && (
                 <select
-                  aria-label="Bill status"
-                  value={billStatusFilter}
-                  onChange={(e) => setBillStatusFilter(e.target.value)}
+                  aria-label="Business category filter"
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
                 >
-                  <option value="All">All bill states</option>
-                  <option value="NotPosted">Not posted</option>
-                  <option value="Posted">Posted</option>
+                  <option>All categories</option>
+                  <option>New goods</option>
+                  <option>Used goods</option>
+                  <option>Service</option>
                 </select>
+              )}
 
+              {!purchase && !quotation && (
                 <select
-                  aria-label="Receipt status"
-                  value={receiptStatusFilter}
-                  onChange={(e) => setReceiptStatusFilter(e.target.value)}
+                  aria-label="Invoice tax type filter"
+                  value={taxTypeFilter}
+                  onChange={(e) => setTaxTypeFilter(e.target.value as 'All' | 'GST' | 'NonGST')}
                 >
-                  <option value="All">All receipt states</option>
-                  <option value="NotReceived">Not received</option>
-                  <option value="PartlyReceived">Partly received</option>
-                  <option value="Received">Received</option>
-                  <option value="ClosedPartlyReceived">Closed partly received</option>
+                  <option value="All">All invoice types</option>
+                  <option value="GST">GST invoices only</option>
+                  <option value="NonGST">Non-GST invoices only</option>
                 </select>
+              )}
 
-                <select
-                  aria-label="Payment status"
-                  value={paymentStatusFilter}
-                  onChange={(e) => setPaymentStatusFilter(e.target.value)}
-                >
-                  <option value="All">All payment states</option>
-                  <option value="Unpaid">Unpaid</option>
-                  <option value="PartlyPaid">Partly paid</option>
-                  <option value="Paid">Paid</option>
-                </select>
-              </>
-            ) : (
-              <select
-                aria-label="Document status"
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-              >
-                <option value="All">All statuses</option>
-                {(quotation
-                  ? ['Draft', 'Shared', 'Converted', 'Expired', 'Cancelled']
-                  : ['Draft', 'Issued', 'Paid', 'PartlyPaid', 'Unpaid', 'Cancelled']
-                ).map((s) => (
-                  <option key={s} value={s}>{s === 'Unpaid' ? 'Outstanding' : s === 'PartlyPaid' ? 'Partly paid' : s}</option>
-                ))}
-              </select>
-            )}
+              {!purchase && !quotation ? (
+                <>
+                  <div className="sales-period-links" aria-label="Sales date shortcuts">
+                    <button type="button" className="link-button" onClick={() => applySalesPeriod(1)}>Today</button>
+                    <button type="button" className="link-button" onClick={() => applySalesPeriod(7)}>7 days</button>
+                    <button type="button" className="link-button" onClick={() => applySalesPeriod(30)}>30 days</button>
+                  </div>
+                  <Field label="From"><input aria-label="Sales from date" type="date" value={dateFrom} max={dateTo || TODAY} onChange={(e) => setDateFrom(e.target.value)} /></Field>
+                  <Field label="To"><input aria-label="Sales to date" type="date" value={dateTo} min={dateFrom} max={TODAY} onChange={(e) => setDateTo(e.target.value)} /></Field>
+                  {(dateFrom || dateTo) && <button type="button" className="link-button" onClick={() => { setDateFrom(''); setDateTo(''); }}>All dates</button>}
+                </>
+              ) : (
+                <>
+                  <input aria-label="Document date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                  {date && <button type="button" className="link-button" onClick={() => setDate('')}>Clear date</button>}
+                </>
+              )}
+            </div>
 
-            {!purchase && !quotation && (
-              <select
-                aria-label="Business category filter"
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-              >
-                <option>All categories</option>
-                <option>New goods</option>
-                <option>Used goods</option>
-                <option>Service</option>
-              </select>
-            )}
-
-            {!purchase && !quotation ? (
-              <>
-                <button type="button" className="link-button" onClick={() => applySalesPeriod(1)}>Today</button>
-                <button type="button" className="link-button" onClick={() => applySalesPeriod(7)}>7 days</button>
-                <button type="button" className="link-button" onClick={() => applySalesPeriod(30)}>30 days</button>
-                <Field label="From"><input aria-label="Sales from date" type="date" value={dateFrom} max={dateTo || TODAY} onChange={(e) => setDateFrom(e.target.value)} /></Field>
-                <Field label="To"><input aria-label="Sales to date" type="date" value={dateTo} min={dateFrom} max={TODAY} onChange={(e) => setDateTo(e.target.value)} /></Field>
-                {(dateFrom || dateTo) && <button type="button" className="link-button" onClick={() => {setDateFrom(''); setDateTo('');}}>All dates</button>}
-              </>
-            ) : (
-              <>
-                <input aria-label="Document date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                {date && <button type="button" className="link-button" onClick={() => setDate('')}>Clear date</button>}
-              </>
-            )}
-          </div>
-
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Document</th>
-                  <th>{purchase ? 'Supplier' : 'Customer'}</th>
-                  <th>Date</th>
-                  <th>Total</th>
-                  {!quotation && <th>Balance due</th>}
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((b) => (
-                  <tr key={b.id}>
-                    <td>
-                      <Link className="record-link" href={path + '/' + b.id}>
-                        {purchase
-                          ? ((b as Purchase).purchaseNumber || b.id)
-                          : quotation
-                            ? ((b as any).quotationNumber || b.id)
-                            : ((b as any).invoiceNumber || b.id)}
-                      </Link>
-                      <small>
-                        {purchase
-                          ? (b as Purchase).reference || 'No ref'
-                          : (b as Bill).kind + ' · ' + (b as Bill).category}
-                      </small>
-                    </td>
-                    <td>
-                      {purchase
-                        ? (b as any).supplierSnapshot?.name || state.suppliers.find((c) => c.id === (b as Purchase).supplierId)?.name
-                        : (b as any).customerSnapshot?.name || (b as any).customerName || state.customers.find((c) => c.id === (b as Bill).customerId)?.name || 'Walk-in customer'}
-                    </td>
-                    <td>{dateLabel(b.date)}</td>
-                    <td className="amount">{money(purchase && isLive ? (b as Purchase).total || 0 : isLive && (b as any).total != null ? (b as any).total : roundedTotal(b))}</td>
-                    {!quotation && <td>{b.status === 'Draft' ? '—' : money(purchase && isLive ? (b as Purchase).dueAmount || 0 : isLive && (b as any).dueAmount != null ? (b as any).dueAmount : balance(state, b))}</td>}
-                    <td>
-                      {purchase ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-start' }}>
-                          <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                            <span title="Document lifecycle state"><Badge>{(b as Purchase).documentStatus || 'Confirmed'}</Badge></span>
-                            <span title="Supplier bill status"><Badge>{(b as Purchase).billStatus || 'Posted'}</Badge></span>
-                          </div>
-                          <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                            <span title="Physical stock receipt"><Badge>{(b as Purchase).receiptStatus || 'Received'}</Badge></span>
-                            <span title="Supplier payment settlement">
-                              <Badge>
-                                {(b as Purchase).paymentStatus || (
-                                  (b as Purchase).dueAmount === 0 || balance(state, b) === 0
-                                    ? 'Paid'
-                                    : ((b as any).paidAmount || paid(state, b.id)) > 0
-                                      ? 'PartlyPaid'
-                                      : 'Unpaid'
-                                )}
-                              </Badge>
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <Badge>
-                          {quotation
-                            ? b.status
-                            : b.status === 'Draft'
-                              ? 'Draft'
-                              : (b as any).paymentStatus === 'PartlyPaid'
-                                ? 'Partly paid'
-                              : (b as any).paymentStatus === 'Paid'
-                                ? 'Paid'
-                              : (b as any).paymentStatus === 'Unpaid'
-                                ? 'Unpaid'
-                              : (isLive && (b as any).dueAmount != null ? (b as any).dueAmount === 0 : balance(state, b) === 0)
-                                ? 'Paid'
-                                : (isLive && (b as any).paidAmount != null ? (b as any).paidAmount > 0 : paid(state, b.id) > 0)
-                                  ? 'Partly paid'
-                                  : 'Unpaid'}
-                        </Badge>
-                      )}
-                    </td>
-                    <td>
-                      <Link className="text-link" href={path + '/' + b.id}>
-                        View <ArrowUpRight size={15} />
-                      </Link>
-                    </td>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Document</th>
+                    <th>{purchase ? 'Supplier' : 'Customer'}</th>
+                    <th>Date</th>
+                    <th>Total</th>
+                    {!quotation && <th>Balance due</th>}
+                    <th>Status</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {list.map((b) => (
+                    <tr key={b.id}>
+                      <td>
+                        <Link className="record-link" href={path + '/' + b.id}>
+                          {purchase
+                            ? ((b as Purchase).purchaseNumber || b.id)
+                            : quotation
+                              ? ((b as any).quotationNumber || b.id)
+                              : ((b as any).invoiceNumber || b.id)}
+                        </Link>
+                        <small>
+                          {purchase
+                            ? (b as Purchase).reference || 'No ref'
+                            : (b as Bill).kind + ' · ' + (b as Bill).category + (!quotation ? ` · ${(b as Bill).lines.length > 0 && (b as Bill).lines.every((line) => line.taxTreatment === 'NonGST') ? 'Non-GST' : 'GST'}` : '')}
+                        </small>
+                      </td>
+                      <td>
+                        {purchase
+                          ? (b as any).supplierSnapshot?.name || state.suppliers.find((c) => c.id === (b as Purchase).supplierId)?.name
+                          : (b as any).customerSnapshot?.name || (b as any).customerName || state.customers.find((c) => c.id === (b as Bill).customerId)?.name || 'Walk-in customer'}
+                      </td>
+                      <td>{dateLabel(b.date)}</td>
+                      <td className="amount">{money(purchase && isLive ? (b as Purchase).total || 0 : isLive && (b as any).total != null ? (b as any).total : roundedTotal(b))}</td>
+                      {!quotation && <td>{b.status === 'Draft' ? '—' : money(purchase && isLive ? (b as Purchase).dueAmount || 0 : isLive && (b as any).dueAmount != null ? (b as any).dueAmount : balance(state, b))}</td>}
+                      <td>
+                        {purchase ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                              <span title="Document lifecycle state"><Badge>{(b as Purchase).documentStatus || 'Confirmed'}</Badge></span>
+                              <span title="Supplier bill status"><Badge>{(b as Purchase).billStatus || 'Posted'}</Badge></span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                              <span title="Physical stock receipt"><Badge>{(b as Purchase).receiptStatus || 'Received'}</Badge></span>
+                              <span title="Supplier payment settlement">
+                                <Badge>
+                                  {(b as Purchase).paymentStatus || (
+                                    (b as Purchase).dueAmount === 0 || balance(state, b) === 0
+                                      ? 'Paid'
+                                      : ((b as any).paidAmount || paid(state, b.id)) > 0
+                                        ? 'PartlyPaid'
+                                        : 'Unpaid'
+                                  )}
+                                </Badge>
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <Badge>
+                            {quotation
+                              ? b.status
+                              : b.status === 'Draft'
+                                ? 'Draft'
+                                : (b as any).paymentStatus === 'PartlyPaid'
+                                  ? 'Partly paid'
+                                  : (b as any).paymentStatus === 'Paid'
+                                    ? 'Paid'
+                                    : (b as any).paymentStatus === 'Unpaid'
+                                      ? 'Unpaid'
+                                      : (isLive && (b as any).dueAmount != null ? (b as any).dueAmount === 0 : balance(state, b) === 0)
+                                        ? 'Paid'
+                                        : (isLive && (b as any).paidAmount != null ? (b as any).paidAmount > 0 : paid(state, b.id) > 0)
+                                          ? 'Partly paid'
+                                          : 'Unpaid'}
+                          </Badge>
+                        )}
+                      </td>
+                      <td>
+                        <Link className="text-link" href={path + '/' + b.id}>
+                          View <ArrowUpRight size={15} />
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          {!list.length && (
-            <Empty
-              title={
-                (purchase && purchaseListLoading) || (quotation && quotationListLoading) || (!purchase && !quotation && invoiceListLoading)
-                  ? 'Loading records…'
-                  : 'No matching records'
-              }
-              text={
-                (purchase && purchaseListLoading) || (quotation && quotationListLoading) || (!purchase && !quotation && invoiceListLoading)
-                  ? 'Records are being loaded from your company account.'
-                  : 'No records match the selected filters.'
-              }
-            />
-          )}
-          <div className="table-footer">
-            {purchase && isLive && purchasePageData ? (
-              <>
-                <span>{purchasePageData.total} matching records · Page {purchasePage} of {purchasePageData.totalPages}</span>
-                <div className="actions">
-                  <Btn secondary disabled={purchasePage <= 1 || purchaseListLoading} onClick={() => setPurchasePage(p => p - 1)}>Previous</Btn>
-                  <Btn secondary disabled={purchasePage >= purchasePageData.totalPages || purchaseListLoading} onClick={() => setPurchasePage(p => p + 1)}>Next</Btn>
-                </div>
-              </>
-            ) : quotation && isLive && quotationPageData ? (
-              <>
-                <span>{quotationPageData.total} matching quotations · Page {quotationPage} of {quotationPageData.totalPages}</span>
-                <div className="actions">
-                  <Btn secondary disabled={quotationPage <= 1 || quotationListLoading} onClick={() => setQuotationPage(p => p - 1)}>Previous</Btn>
-                  <Btn secondary disabled={quotationPage >= quotationPageData.totalPages || quotationListLoading} onClick={() => setQuotationPage(p => p + 1)}>Next</Btn>
-                </div>
-              </>
-            ) : !purchase && !quotation && isLive && invoicePageData ? (
-              <>
-                <span>{invoicePageData.total} matching invoices · Page {invoicePage} of {invoicePageData.totalPages}</span>
-                <div className="actions">
-                  <Btn secondary disabled={invoicePage <= 1 || invoiceListLoading} onClick={() => setInvoicePage(p => p - 1)}>Previous</Btn>
-                  <Btn secondary disabled={invoicePage >= invoicePageData.totalPages || invoiceListLoading} onClick={() => setInvoicePage(p => p + 1)}>Next</Btn>
-                </div>
-              </>
-            ) : (
-              <span>{list.length} records · All matching records shown</span>
+            {!list.length && (
+              <Empty
+                title={
+                  (purchase && purchaseListLoading) || (quotation && quotationListLoading) || (!purchase && !quotation && invoiceListLoading)
+                    ? 'Loading records…'
+                    : 'No matching records'
+                }
+                text={
+                  (purchase && purchaseListLoading) || (quotation && quotationListLoading) || (!purchase && !quotation && invoiceListLoading)
+                    ? 'Records are being loaded from your company account.'
+                    : 'No records match the selected filters.'
+                }
+              />
             )}
-          </div>
-        </Card>
+            <div className="table-footer">
+              {purchase && isLive && purchasePageData ? (
+                <>
+                  <span>{purchasePageData.total} matching records · Page {purchasePage} of {purchasePageData.totalPages}</span>
+                  <div className="actions">
+                    <Btn secondary disabled={purchasePage <= 1 || purchaseListLoading} onClick={() => setPurchasePage(p => p - 1)}>Previous</Btn>
+                    <Btn secondary disabled={purchasePage >= purchasePageData.totalPages || purchaseListLoading} onClick={() => setPurchasePage(p => p + 1)}>Next</Btn>
+                  </div>
+                </>
+              ) : quotation && isLive && quotationPageData ? (
+                <>
+                  <span>{quotationPageData.total} matching quotations · Page {quotationPage} of {quotationPageData.totalPages}</span>
+                  <div className="actions">
+                    <Btn secondary disabled={quotationPage <= 1 || quotationListLoading} onClick={() => setQuotationPage(p => p - 1)}>Previous</Btn>
+                    <Btn secondary disabled={quotationPage >= quotationPageData.totalPages || quotationListLoading} onClick={() => setQuotationPage(p => p + 1)}>Next</Btn>
+                  </div>
+                </>
+              ) : !purchase && !quotation && isLive && invoicePageData ? (
+                <>
+                  <span>{invoicePageData.total} matching invoices · Page {invoicePage} of {invoicePageData.totalPages}</span>
+                  <div className="actions">
+                    <Btn secondary disabled={invoicePage <= 1 || invoiceListLoading} onClick={() => setInvoicePage(p => p - 1)}>Previous</Btn>
+                    <Btn secondary disabled={invoicePage >= invoicePageData.totalPages || invoiceListLoading} onClick={() => setInvoicePage(p => p + 1)}>Next</Btn>
+                  </div>
+                </>
+              ) : (
+                <span>{list.length} records · All matching records shown</span>
+              )}
+            </div>
+          </Card>
         </>
       )}
 

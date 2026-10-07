@@ -76,6 +76,13 @@ export async function getCompanySettings(identity: Identity) {
       invoicePrefix: 'INV',
       serviceInvoicePrefix: 'SRV',
       invoiceStartNumber: 1,
+      gstInvoiceNumberLabel: 'GST Invoice No',
+      nonGstInvoiceNumberLabel: 'Non-GST Invoice No',
+      gstInvoicePrefix: 'INV',
+      nonGstInvoicePrefix: 'NGST',
+      gstInvoiceStartNumber: 1,
+      nonGstInvoiceStartNumber: 1,
+      invoiceNumberingMode: 'separate',
       invoiceNumberPadding: 4,
       invoiceIncludeFinancialYear: true,
       invoiceNumberSeparator: '-',
@@ -107,25 +114,67 @@ export async function updateCompanySettings(identity: Identity, input: CompanySe
 
       const existing = await col(db, 'companySettings').findOne({tenantId: identity.tenantId}, {session});
 
-      const previousStart = Number(existing?.invoiceStartNumber || 1);
-      if (input.invoiceStartNumber !== previousStart) {
-        const today = todayInKolkata();
-        const year = Number(today.slice(0, 4));
-        const month = Number(today.slice(5, 7));
-        const financialYear = month >= 4 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
-        const counterYear = input.invoiceIncludeFinancialYear ? financialYear : 'ALL';
-        for (const sequenceType of ['Invoice', 'ServiceInvoice'] as const) {
-          const counterId = `CNT-${identity.tenantId}-${sequenceType}-${counterYear}`;
-          const counter = await col(db, 'tenantCounters').findOne({_id: counterId, tenantId: identity.tenantId}, {session});
-          if (counter && input.invoiceStartNumber <= Number(counter.currentValue || 0)) {
-            throw new AppError(409, `Starting number must be greater than the last ${sequenceType === 'Invoice' ? 'sales' : 'service'} invoice number (${counter.currentValue}).`);
-          }
+      const today = todayInKolkata();
+      const year = Number(today.slice(0, 4));
+      const month = Number(today.slice(5, 7));
+      const financialYear = month >= 4 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+      const counterYear = input.invoiceIncludeFinancialYear ? financialYear : 'ALL';
+      const sharedNumbering = input.invoiceNumberingMode === 'shared';
+      const previousNumberingMode = existing?.invoiceNumberingMode === 'shared' ? 'shared' : 'separate';
+      if (previousNumberingMode !== input.invoiceNumberingMode) {
+        const invoiceCounterId = `CNT-${identity.tenantId}-Invoice-${counterYear}`;
+        const nonGstCounterId = `CNT-${identity.tenantId}-NonGSTInvoice-${counterYear}`;
+        const invoiceCounter = await col(db, 'tenantCounters').findOne({_id: invoiceCounterId, tenantId: identity.tenantId}, {session});
+        const nonGstCounter = await col(db, 'tenantCounters').findOne({_id: nonGstCounterId, tenantId: identity.tenantId}, {session});
+        const invoiceValue = Number(invoiceCounter?.currentValue || 0);
+        const nonGstValue = Number(nonGstCounter?.currentValue || 0);
+        if (sharedNumbering && Math.max(invoiceValue, nonGstValue) > invoiceValue) {
           await col(db, 'tenantCounters').updateOne(
-            {_id: counterId, tenantId: identity.tenantId},
-            {$set: {tenantId: identity.tenantId, sequenceType, year: counterYear, currentValue: input.invoiceStartNumber - 1, updatedAt: new Date()}},
+            {_id: invoiceCounterId, tenantId: identity.tenantId},
+            {$set: {tenantId: identity.tenantId, sequenceType: 'Invoice', year: counterYear, currentValue: Math.max(invoiceValue, nonGstValue), updatedAt: new Date()}},
+            {upsert: true, session}
+          );
+        } else if (!sharedNumbering && invoiceValue > nonGstValue) {
+          await col(db, 'tenantCounters').updateOne(
+            {_id: nonGstCounterId, tenantId: identity.tenantId},
+            {$set: {tenantId: identity.tenantId, sequenceType: 'NonGSTInvoice', year: counterYear, currentValue: invoiceValue, updatedAt: new Date()}},
             {upsert: true, session}
           );
         }
+      }
+      const sequenceUpdates: Array<{sequenceType: 'Invoice' | 'NonGSTInvoice'; label: string; startNumber: number; previousStart: number}> = sharedNumbering
+        ? [{
+            sequenceType: 'Invoice',
+            label: 'shared invoice',
+            startNumber: input.gstInvoiceStartNumber,
+            previousStart: Number(existing?.gstInvoiceStartNumber ?? existing?.invoiceStartNumber ?? 1),
+          }]
+        : [
+            {
+              sequenceType: 'Invoice',
+              label: 'GST invoice',
+              startNumber: input.gstInvoiceStartNumber,
+              previousStart: Number(existing?.gstInvoiceStartNumber ?? existing?.invoiceStartNumber ?? 1),
+            },
+            {
+              sequenceType: 'NonGSTInvoice',
+              label: 'Non-GST invoice',
+              startNumber: input.nonGstInvoiceStartNumber,
+              previousStart: Number(existing?.nonGstInvoiceStartNumber ?? 1),
+            },
+          ];
+      for (const sequence of sequenceUpdates) {
+        if (sequence.startNumber === sequence.previousStart) continue;
+        const counterId = `CNT-${identity.tenantId}-${sequence.sequenceType}-${counterYear}`;
+        const counter = await col(db, 'tenantCounters').findOne({_id: counterId, tenantId: identity.tenantId}, {session});
+        if (counter && sequence.startNumber <= Number(counter.currentValue || 0)) {
+          throw new AppError(409, `${sequence.label} starting number must be greater than the last issued number (${counter.currentValue}). Existing invoice numbers are never reused.`);
+        }
+        await col(db, 'tenantCounters').updateOne(
+          {_id: counterId, tenantId: identity.tenantId},
+          {$set: {tenantId: identity.tenantId, sequenceType: sequence.sequenceType, year: counterYear, currentValue: sequence.startNumber - 1, updatedAt: new Date()}},
+          {upsert: true, session}
+        );
       }
 
       const update = {

@@ -40,6 +40,8 @@ export async function GET(request: Request) {
     const dateTo = url.searchParams.get('dateTo') || undefined;
     const search = (url.searchParams.get('search') || '').trim().slice(0, 200);
     const businessCategory = url.searchParams.get('businessCategory') || undefined;
+    const taxType = url.searchParams.get('taxType') || undefined;
+    const exportLabel = taxType === 'NonGST' ? 'non-gst-invoices' : taxType === 'GST' ? 'gst-invoices' : 'invoices';
 
     const filter: Record<string, any> = {tenantId: identity.tenantId};
     if (hasDue || status === 'Unpaid') {
@@ -58,6 +60,8 @@ export async function GET(request: Request) {
     if (businessCategory && ['NewGoods', 'UsedGoods', 'Service'].includes(businessCategory)) {
       filter.businessCategory = businessCategory;
     }
+    if (taxType === 'NonGST') filter.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
+    if (taxType === 'GST') filter.lines = {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}};
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [
@@ -494,7 +498,7 @@ export async function GET(request: Request) {
     return new Response(new Uint8Array(zipBuffer), {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="invoices-bundle-${Date.now()}.zip"`,
+        'Content-Disposition': `attachment; filename="${exportLabel}-bundle-${Date.now()}.zip"`,
       },
     });
   } catch (err: any) {

@@ -21,3 +21,34 @@ body{font-size:16px}.field>span,.badge{font-size:14px}.nav-label,.eyebrow,.brand
 :root{--primary:#c28a00;--primary-dark:#946900;--muted:#746f61;--line:#e7dfc8;--orange:#b66e00}
 .nav-link.active{background:#f2c94c;color:#332800;box-shadow:0 3px 10px #a879002b}.nav-link.active small{background:#fff8d3;color:#614800}.welcome-strip{background:#fff5ce;border-color:#ead68a}.welcome-strip p{color:#755f1d}.stat-icon.purple{background:#fff0ae;color:#7c5c00}.bar,.horizontal-track i{background:#d9ad22}.btn.secondary{color:#684f00;border-color:#dfc66d;background:#fffdf5}.btn.secondary:hover{background:#fff2b7;color:#4b3900}.notice{background:#fff8db;color:#6f570e;border-color:#e8d27c}.demo-pill{background:#fff1b6;color:#674d00;border-color:#e4ca6c}.tabs button.active{background:#f2c94c;color:#332800;border-color:#d0a900}.template-live-preview{background:#ece9df}.template-thumbnail{background:#fff4c5;border-color:#e3cf78}.user-menu:hover,.user-menu[aria-expanded=true],.account-menu-panel>a:hover,.account-menu-panel>button:hover{background:#fff7d6;color:#684f00}.account-data-status.demo,.module-migration-notice.preview{background:#fff8dc;color:#6a5000;border-color:#ead47f}.module-badge.preview{color:#6b5000;background:#fff0ae}.btn.danger{color:#fff}
 .calibration-grid{display:grid;grid-template-columns:1fr;gap:15px}.calibration-grid .field{min-width:0}.calibration-grid select,.calibration-grid input{width:100%}
+
+/* Keep the Sales filters together: the date fields should never fall below the
+   toolbar while there is still room for them on the same row. */
+.sales-filter-toolbar{display:grid;grid-template-columns:minmax(240px,1.7fr) repeat(3,minmax(135px,1fr)) minmax(205px,auto) minmax(145px,.8fr) minmax(145px,.8fr) auto;align-items:end;gap:12px 14px}
+.sales-filter-toolbar .search-field{width:100%;min-width:0}
+.sales-filter-toolbar>select{width:100%;min-width:0}
+.sales-filter-toolbar>.field{width:100%;min-width:0}
+.sales-filter-toolbar>.field input{width:100%;min-width:0}
+.sales-period-links{display:flex;align-items:center;gap:12px;white-space:nowrap;height:42px}
+.sales-summary-dashboard{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+.sales-filter-toolbar>.link-button{align-self:end;white-space:nowrap}
+.sales-filter-toolbar>.field>span{line-height:1.1}
+@media(max-width:1350px){
+  .sales-filter-toolbar{grid-template-columns:minmax(220px,1.4fr) repeat(2,minmax(135px,1fr)) minmax(190px,auto) repeat(2,minmax(135px,.8fr)) auto}
+  .sales-filter-toolbar .search-field{grid-column:span 2}
+  .sales-filter-toolbar>.sales-period-links{grid-column:span 1}
+}
+@media(max-width:900px){
+  .sales-summary-dashboard{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .sales-filter-toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sales-filter-toolbar .search-field{grid-column:1/-1}
+  .sales-filter-toolbar .sales-period-links{grid-column:1/-1}
+  .sales-filter-toolbar>.link-button{justify-self:start}
+}
+@media(max-width:600px){
+  .sales-summary-dashboard{grid-template-columns:1fr!important}
+  .sales-filter-toolbar{grid-template-columns:1fr}
+  .sales-filter-toolbar .search-field,.sales-filter-toolbar .sales-period-links{grid-column:auto}
+  .sales-filter-toolbar>.field,.sales-filter-toolbar>select{width:100%}
+  .sales-period-links{flex-wrap:wrap;height:auto;min-height:42px}
+}

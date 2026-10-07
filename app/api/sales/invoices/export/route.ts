@@ -31,6 +31,8 @@ export async function GET(request: Request) {
     const dateTo = url.searchParams.get('dateTo') || undefined;
     const search = (url.searchParams.get('search') || '').trim().slice(0, 200);
     const businessCategory = url.searchParams.get('businessCategory') || undefined;
+    const taxType = url.searchParams.get('taxType') || undefined;
+    const exportLabel = taxType === 'NonGST' ? 'non-gst-invoices' : taxType === 'GST' ? 'gst-invoices' : 'invoices';
 
     const filter: Record<string, any> = {tenantId: identity.tenantId};
     if (hasDue || status === 'Unpaid') {
@@ -47,6 +49,8 @@ export async function GET(request: Request) {
     }
     if (customerId) filter.customerId = customerId;
     if (businessCategory && ['NewGoods', 'UsedGoods', 'Service'].includes(businessCategory)) filter.businessCategory = businessCategory;
+    if (taxType === 'NonGST') filter.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
+    if (taxType === 'GST') filter.lines = {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}};
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [
@@ -77,7 +81,7 @@ export async function GET(request: Request) {
     ]);
 
     const companyName = company?.name || 'Billing Software';
-    const filterDesc = `Applied filters: ${hasDue ? 'Has Due, ' : ''}${status ? `Status: ${status}, ` : ''}${dateFrom ? `From: ${dateFrom}, ` : ''}${dateTo ? `To: ${dateTo}` : 'All records'}`;
+    const filterDesc = `Applied filters: ${taxType ? `Invoice type: ${taxType === 'NonGST' ? 'Non-GST' : 'GST'}, ` : ''}${hasDue ? 'Has Due, ' : ''}${status ? `Status: ${status}, ` : ''}${dateFrom ? `From: ${dateFrom}, ` : ''}${dateTo ? `To: ${dateTo}` : 'All records'}`;
 
     const headers = [
       'Invoice Number',
@@ -134,7 +138,7 @@ export async function GET(request: Request) {
       return new Response(buffer, {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="invoices-export-${Date.now()}.xlsx"`,
+          'Content-Disposition': `attachment; filename="${exportLabel}-export-${Date.now()}.xlsx"`,
         },
       });
     }
@@ -170,7 +174,7 @@ export async function GET(request: Request) {
       return new Response(pdfBytes, {
         headers: {
           'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="invoices-export-${Date.now()}.pdf"`,
+          'Content-Disposition': `attachment; filename="${exportLabel}-export-${Date.now()}.pdf"`,
         },
       });
     }
@@ -184,7 +188,7 @@ export async function GET(request: Request) {
     return new Response(csvContent, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="invoices-export-${Date.now()}.csv"`,
+        'Content-Disposition': `attachment; filename="${exportLabel}-export-${Date.now()}.csv"`,
       },
     });
   } catch (err: any) {

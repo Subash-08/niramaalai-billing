@@ -47,11 +47,20 @@ export const CompanySettingsSchema = z.object({
   invoicePrefix: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/, 'Use letters, numbers, hyphens or underscores').optional().default('INV'),
   serviceInvoicePrefix: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/, 'Use letters, numbers, hyphens or underscores').optional().default('SRV'),
   invoiceStartNumber: z.number().int().min(1).max(999999999).optional().default(1),
+  gstInvoiceNumberLabel: z.string().trim().min(1).max(40).optional().default('GST Invoice No'),
+  nonGstInvoiceNumberLabel: z.string().trim().min(1).max(40).optional().default('Non-GST Invoice No'),
+  gstInvoicePrefix: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/, 'Use letters, numbers, hyphens or underscores').optional().default('INV'),
+  nonGstInvoicePrefix: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/, 'Use letters, numbers, hyphens or underscores').optional().default('NGST'),
+  gstInvoiceStartNumber: z.number().int().min(1).max(999999999).optional().default(1),
+  nonGstInvoiceStartNumber: z.number().int().min(1).max(999999999).optional().default(1),
+  invoiceNumberingMode: z.enum(['separate', 'shared']).optional().default('separate'),
   invoiceNumberPadding: z.number().int().min(0).max(9).optional().default(4),
   invoiceIncludeFinancialYear: z.boolean().optional().default(true),
   invoiceNumberSeparator: z.enum(['-', '/', '_', '']).optional().default('-'),
   logoFileId: z.string().trim().max(100).optional(),
-}).strict().refine(value => value.invoicePrefix.toUpperCase() !== value.serviceInvoicePrefix.toUpperCase(), {message: 'Sales and service invoice prefixes must be different.', path: ['serviceInvoicePrefix']});
+}).strict()
+  .refine(value => value.invoicePrefix.toUpperCase() !== value.serviceInvoicePrefix.toUpperCase(), {message: 'Sales and service invoice prefixes must be different.', path: ['serviceInvoicePrefix']})
+  .refine(value => value.invoiceNumberingMode === 'shared' || value.gstInvoicePrefix.toUpperCase() !== value.nonGstInvoicePrefix.toUpperCase(), {message: 'GST and Non-GST invoice prefixes must be different when separate sequences are enabled.', path: ['nonGstInvoicePrefix']});
 
 export type CompanySettingsInput = z.infer<typeof CompanySettingsSchema>;
 

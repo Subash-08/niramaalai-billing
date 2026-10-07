@@ -80,7 +80,7 @@ function escapeRegex(value: string): string {
 export async function nextTenantSequence(
   db: Db,
   tenantId: string,
-  sequenceType: 'Purchase' | 'Receipt' | 'Payment' | 'PaymentVoucher' | 'CreditNote' | 'Return' | 'Refund' | 'Advance' | 'Quotation' | 'Invoice' | 'ServiceInvoice' | 'ServiceJob' | 'Enquiry',
+  sequenceType: 'Purchase' | 'Receipt' | 'Payment' | 'PaymentVoucher' | 'CreditNote' | 'Return' | 'Refund' | 'Advance' | 'Quotation' | 'Invoice' | 'NonGSTInvoice' | 'ServiceInvoice' | 'ServiceJob' | 'Enquiry',
   year: string,
   prefix: string,
   session?: ClientSession,
