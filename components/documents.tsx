@@ -2998,11 +2998,6 @@ export default function Documents({
                   Service invoice
                 </Link>
               )}
-              {!quotation && !purchase && (
-                <Link className="btn secondary" href="/sales/new?taxType=non-gst">
-                  Non-GST invoice
-                </Link>
-              )}
               <Link href={path + '/new'} className="btn">
                 <Plus size={16} />
                 New invoice

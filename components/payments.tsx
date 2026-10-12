@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ArrowDownLeft,
@@ -186,6 +188,14 @@ export default function Payments({ id }: { id?: string }) {
               <ArrowUpRight size={16} />
               Record payment voucher
             </Btn>
+            <Link
+              href="/sales/new?taxType=non-gst"
+              className="btn secondary"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <Plus size={16} />
+              Non-GST invoice
+            </Link>
           </div>
         }
       />
