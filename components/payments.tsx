@@ -27,6 +27,18 @@ interface UnpaidInvoice {
   due?: number;
 }
 
+function printPaymentDocument() {
+  const printClass = 'payment-document-printing';
+  const cleanup = () => document.body.classList.remove(printClass);
+  document.body.classList.add(printClass);
+  window.addEventListener('afterprint', cleanup, { once: true });
+  try {
+    window.print();
+  } finally {
+    cleanup();
+  }
+}
+
 export default function Payments({ id }: { id?: string }) {
   const searchParams = useSearchParams();
   const {
@@ -262,19 +274,9 @@ export default function Payments({ id }: { id?: string }) {
       {activeTab === 'received' && (
         <Card className="payment-records-card" title="Customer Receipts" sub="Single-invoice settlement receipts recorded for customer billing.">
           {/* Filters Bar */}
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '0.75rem',
-              alignItems: 'center',
-              marginBottom: '1.25rem',
-              padding: '0.75rem',
-              background: 'var(--surface-muted, #f9fafb)',
-              borderRadius: '6px',
-            }}
-          >
-            <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
+          <div className="payment-filter-toolbar">
+            <label className="payment-filter-field payment-filter-search">
+              <span>Search</span>
               <input
                 type="text"
                 placeholder="Search receipt #, invoice #..."
@@ -288,8 +290,9 @@ export default function Payments({ id }: { id?: string }) {
                   border: '1px solid var(--border, #d1d5db)',
                 }}
               />
-            </div>
-            <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
+            </label>
+            <div className="payment-filter-field payment-filter-customer">
+              <span>Customer</span>
               <SearchSelect
                 placeholder="Filter by customer..."
                 value={receiptCustomerFilter}
@@ -322,14 +325,17 @@ export default function Payments({ id }: { id?: string }) {
                 onClear={() => { setReceiptCustomerFilter(''); setReceiptPage(1); }}
               />
             </div>
-            <select aria-label="Receipt payment method" value={receiptMethod} onChange={(e) => { setReceiptMethod(e.target.value); setReceiptPage(1); }}>
-              <option value="">All payment methods</option>
-              <option value="Cash">Cash</option><option value="UPI">GPay / UPI</option><option value="BankTransfer">Bank transfer</option><option value="Card">Card</option><option value="Cheque">Cheque</option>
-            </select>
-            <input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Min amount" aria-label="Minimum receipt amount" value={receiptMinAmount} onChange={(e) => { setReceiptMinAmount(e.target.value); setReceiptPage(1); }} />
-            <input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Max amount" aria-label="Maximum receipt amount" value={receiptMaxAmount} onChange={(e) => { setReceiptMaxAmount(e.target.value); setReceiptPage(1); }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)' }}>From:</span>
+            <label className="payment-filter-field">
+              <span>Payment method</span>
+              <select aria-label="Receipt payment method" value={receiptMethod} onChange={(e) => { setReceiptMethod(e.target.value); setReceiptPage(1); }}>
+                <option value="">All payment methods</option>
+                <option value="Cash">Cash</option><option value="UPI">GPay / UPI</option><option value="BankTransfer">Bank transfer</option><option value="Card">Card</option><option value="Cheque">Cheque</option>
+              </select>
+            </label>
+            <label className="payment-filter-field"><span>Minimum amount</span><input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Min amount" aria-label="Minimum receipt amount" value={receiptMinAmount} onChange={(e) => { setReceiptMinAmount(e.target.value); setReceiptPage(1); }} /></label>
+            <label className="payment-filter-field"><span>Maximum amount</span><input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Max amount" aria-label="Maximum receipt amount" value={receiptMaxAmount} onChange={(e) => { setReceiptMaxAmount(e.target.value); setReceiptPage(1); }} /></label>
+            <label className="payment-filter-field">
+              <span>From</span>
               <input
                 type="date"
                 value={receiptDateFrom}
@@ -341,9 +347,9 @@ export default function Payments({ id }: { id?: string }) {
                   border: '1px solid var(--border, #d1d5db)',
                 }}
               />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)' }}>To:</span>
+            </label>
+            <label className="payment-filter-field">
+              <span>To</span>
               <input
                 type="date"
                 value={receiptDateTo}
@@ -355,9 +361,10 @@ export default function Payments({ id }: { id?: string }) {
                   border: '1px solid var(--border, #d1d5db)',
                 }}
               />
-            </div>
+            </label>
             <Btn
               secondary
+              className="payment-filter-reset"
               onClick={() => {
                 setReceiptSearch('');
                 setReceiptCustomerFilter('');
@@ -540,19 +547,9 @@ export default function Payments({ id }: { id?: string }) {
       {activeTab === 'paid' && (
         <Card className="payment-records-card" title="Money paid" sub="Record business expenses paid by cash, UPI, bank transfer or card.">
           {/* Filters Bar */}
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '0.75rem',
-              alignItems: 'center',
-              marginBottom: '1.25rem',
-              padding: '0.75rem',
-              background: 'var(--surface-muted, #f9fafb)',
-              borderRadius: '6px',
-            }}
-          >
-            <div style={{ flex: '1 1 250px', minWidth: '200px' }}>
+          <div className="payment-filter-toolbar payment-filter-toolbar-paid">
+            <label className="payment-filter-field payment-filter-search">
+              <span>Search</span>
               <input
                 type="text"
                 placeholder="Search voucher #, payee, purpose..."
@@ -566,15 +563,18 @@ export default function Payments({ id }: { id?: string }) {
                   border: '1px solid var(--border, #d1d5db)',
                 }}
               />
-            </div>
-            <select aria-label="Money paid method" value={voucherMethod} onChange={(e) => { setVoucherMethod(e.target.value); setVoucherPage(1); }}>
-              <option value="">All payment methods</option>
-              <option value="Cash">Cash</option><option value="UPI">GPay / UPI</option><option value="BankTransfer">Bank transfer</option><option value="Card">Card</option><option value="Cheque">Cheque</option>
-            </select>
-            <input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Min amount" aria-label="Minimum money paid amount" value={voucherMinAmount} onChange={(e) => { setVoucherMinAmount(e.target.value); setVoucherPage(1); }} />
-            <input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Max amount" aria-label="Maximum money paid amount" value={voucherMaxAmount} onChange={(e) => { setVoucherMaxAmount(e.target.value); setVoucherPage(1); }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)' }}>From:</span>
+            </label>
+            <label className="payment-filter-field">
+              <span>Payment method</span>
+              <select aria-label="Money paid method" value={voucherMethod} onChange={(e) => { setVoucherMethod(e.target.value); setVoucherPage(1); }}>
+                <option value="">All payment methods</option>
+                <option value="Cash">Cash</option><option value="UPI">GPay / UPI</option><option value="BankTransfer">Bank transfer</option><option value="Card">Card</option><option value="Cheque">Cheque</option>
+              </select>
+            </label>
+            <label className="payment-filter-field"><span>Minimum amount</span><input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Min amount" aria-label="Minimum money paid amount" value={voucherMinAmount} onChange={(e) => { setVoucherMinAmount(e.target.value); setVoucherPage(1); }} /></label>
+            <label className="payment-filter-field"><span>Maximum amount</span><input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Max amount" aria-label="Maximum money paid amount" value={voucherMaxAmount} onChange={(e) => { setVoucherMaxAmount(e.target.value); setVoucherPage(1); }} /></label>
+            <label className="payment-filter-field">
+              <span>From</span>
               <input
                 type="date"
                 value={voucherDateFrom}
@@ -586,9 +586,9 @@ export default function Payments({ id }: { id?: string }) {
                   border: '1px solid var(--border, #d1d5db)',
                 }}
               />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)' }}>To:</span>
+            </label>
+            <label className="payment-filter-field">
+              <span>To</span>
               <input
                 type="date"
                 value={voucherDateTo}
@@ -600,9 +600,10 @@ export default function Payments({ id }: { id?: string }) {
                   border: '1px solid var(--border, #d1d5db)',
                 }}
               />
-            </div>
+            </label>
             <Btn
               secondary
+              className="payment-filter-reset"
               onClick={() => {
                 setVoucherSearch('');
                 setVoucherDateFrom('');
@@ -1419,7 +1420,7 @@ export function ReceiptPreviewModal({
   }
 
   function handlePrint() {
-    window.print();
+    printPaymentDocument();
   }
 
   return (
@@ -1600,7 +1601,7 @@ export function VoucherPreviewModal({
   }
 
   function handlePrint() {
-    window.print();
+    printPaymentDocument();
   }
 
   return (

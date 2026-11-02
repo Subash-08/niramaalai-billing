@@ -55,15 +55,25 @@ body{font-size:16px}.field>span,.badge{font-size:14px}.nav-label,.eyebrow,.brand
   .sales-period-links{flex-wrap:wrap;height:auto;min-height:42px}
 }
 
-/* A receipt is opened in a dialog. Print only its document, never the page
-   behind the dialog or the dialog title and actions. */
+/* Print a selected receipt or money-paid voucher as a standalone document. */
 @media print{
-  body:has(.receipt-document) main>:not(.modal-backdrop){display:none!important}
-  body:has(.receipt-document) .modal-backdrop{position:static!important;display:block!important;padding:0!important;background:#fff!important;backdrop-filter:none!important}
-  body:has(.receipt-document) .modal{display:block!important;width:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:#fff!important}
-  body:has(.receipt-document) .modal-head,
-  body:has(.receipt-document) .no-print{display:none!important}
-  body:has(.receipt-document) .receipt-document{display:block!important;width:100%!important;max-width:none!important;margin:0!important;padding:12mm!important;border:0!important;border-radius:0!important;box-shadow:none!important;break-inside:avoid!important}
+  body.payment-document-printing{background:#fff!important}
+  body.payment-document-printing .sidebar,
+  body.payment-document-printing .topbar,
+  body.payment-document-printing .app-footer,
+  body.payment-document-printing .payments-page>:not(.modal-backdrop){display:none!important}
+  body.payment-document-printing .main-shell{margin:0!important}
+  body.payment-document-printing main{max-width:none!important;margin:0!important;padding:0!important}
+  body.payment-document-printing *{visibility:hidden!important}
+  body.payment-document-printing .modal-backdrop,
+  body.payment-document-printing .modal,
+  body.payment-document-printing .printable-document,
+  body.payment-document-printing .printable-document *{visibility:visible!important}
+  body.payment-document-printing .modal-backdrop{position:static!important;display:block!important;padding:0!important;background:#fff!important;backdrop-filter:none!important}
+  body.payment-document-printing .modal{position:static!important;display:block!important;width:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:#fff!important}
+  body.payment-document-printing .modal-head,
+  body.payment-document-printing .no-print{display:none!important}
+  body.payment-document-printing .printable-document{display:block!important;width:100%!important;max-width:none!important;min-height:0!important;margin:0!important;padding:10mm!important;border:0!important;border-radius:0!important;box-shadow:none!important;break-inside:avoid!important;page-break-inside:avoid!important}
 }
 .notification-panel{padding:14px!important;max-height:min(440px,calc(100vh - 90px));overflow-y:auto}.notification-panel>strong{display:block;padding:2px 4px 10px;font-size:13px}.notification-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--line)}.notification-row>a{flex:1;border:0!important;padding:11px 4px!important;white-space:normal;line-height:1.35}.notification-row .link-button{padding:6px 8px;white-space:nowrap;border-radius:6px}.notification-row .link-button:hover{background:#fff6d8}.notification-empty{display:block;padding:14px 4px;color:var(--muted);font-size:12px;line-height:1.5}.notification-panel>a:last-child{margin-top:5px;border:0!important;color:var(--primary);font-weight:700}
 /* Long company names must grow the sidebar header instead of being clipped. */
@@ -104,8 +114,17 @@ body{font-size:16px}.field>span,.badge{font-size:14px}.nav-label,.eyebrow,.brand
 .payment-records-card>div:not(.card-head),.payment-records-card>.empty{margin-left:20px;margin-right:20px}
 .payment-records-card>.table-wrap{border:1px solid var(--line);border-radius:8px}
 .payment-records-card>.card-head+div{margin-top:0}
-.payment-records-card select,.payment-records-card .payment-amount-filter{min-height:38px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:7px 10px;color:var(--ink)}
-.payment-records-card .payment-amount-filter{width:118px}
+.payment-filter-toolbar{display:grid;grid-template-columns:minmax(210px,1.7fr) minmax(210px,1.5fr) minmax(155px,1fr) minmax(120px,.75fr) minmax(120px,.75fr);gap:12px;align-items:end;margin-bottom:20px;padding:14px;background:var(--surface-muted,#f9fafb);border:1px solid var(--line);border-radius:8px}
+.payment-filter-toolbar-paid{grid-template-columns:minmax(240px,1.8fr) minmax(165px,1fr) minmax(120px,.75fr) minmax(120px,.75fr)}
+.payment-filter-field{display:flex;min-width:0;flex-direction:column;gap:6px;color:var(--muted);font-size:12px;font-weight:700;line-height:1.2}
+.payment-filter-field input,.payment-filter-field select,.payment-filter-field .search-select{width:100%;min-width:0}
+.payment-records-card select,.payment-records-card .payment-amount-filter,.payment-filter-field input{min-height:40px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:8px 10px;color:var(--ink)}
+.payment-records-card .payment-amount-filter{width:100%}
+.payment-filter-reset{min-height:40px;align-self:end;justify-self:start}
+@media(max-width:1300px){
+  .payment-filter-toolbar,.payment-filter-toolbar-paid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .payment-filter-search,.payment-filter-customer{grid-column:span 1}
+}
 .reference-parties.quotation-party{grid-template-columns:1fr}
 .quotation-party>div{min-height:24mm}
 
@@ -130,6 +149,8 @@ body{font-size:16px}.field>span,.badge{font-size:14px}.nav-label,.eyebrow,.brand
   .payments-tab-action{width:100%;margin-left:0;padding:8px 0 12px}
   .payments-tab-action .btn{width:100%}
   .payment-records-card>div:not(.card-head),.payment-records-card>.empty{margin-left:12px;margin-right:12px}
+  .payment-filter-toolbar,.payment-filter-toolbar-paid{grid-template-columns:1fr}
+  .payment-filter-reset{width:100%}
   .print-job-specification-head,.print-job-custom-detail{align-items:stretch;flex-direction:column}
   .print-job-specification-grid{grid-template-columns:1fr}
 }
