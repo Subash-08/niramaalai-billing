@@ -420,6 +420,9 @@ export function StoreProvider({children}: {children: ReactNode}) {
         invoiceNumberPadding: Number(f.invoiceNumberPadding ?? 4),
         invoiceIncludeFinancialYear: f.invoiceIncludeFinancialYear !== false,
         invoiceNumberSeparator: f.invoiceNumberSeparator ?? '-',
+        quotationNumberLabel: f.quotationNumberLabel || 'Quotation No',
+        quotationPrefix: f.quotationPrefix || 'QUO',
+        quotationStartNumber: Number(f.quotationStartNumber || 1),
         ...(logoFileId ? {logoFileId} : {}),
       };
 
@@ -2205,6 +2208,9 @@ export function StoreProvider({children}: {children: ReactNode}) {
     if (query.search) p.set('search', query.search);
     if (query.dateFrom) p.set('dateFrom', query.dateFrom);
     if (query.dateTo) p.set('dateTo', query.dateTo);
+    if (query.method) p.set('method', query.method);
+    if (query.minAmountPaise != null) p.set('minAmountPaise', String(query.minAmountPaise));
+    if (query.maxAmountPaise != null) p.set('maxAmountPaise', String(query.maxAmountPaise));
     const res = await fetch(`/api/sales/receipts?${p.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to load receipts.');
@@ -2254,6 +2260,9 @@ export function StoreProvider({children}: {children: ReactNode}) {
     if (query.search) p.set('search', query.search);
     if (query.dateFrom) p.set('dateFrom', query.dateFrom);
     if (query.dateTo) p.set('dateTo', query.dateTo);
+    if (query.method) p.set('method', query.method);
+    if (query.minAmountPaise != null) p.set('minAmountPaise', String(query.minAmountPaise));
+    if (query.maxAmountPaise != null) p.set('maxAmountPaise', String(query.maxAmountPaise));
     const res = await fetch(`/api/payments/vouchers?${p.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to load payment vouchers.');

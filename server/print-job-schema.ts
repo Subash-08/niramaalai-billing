@@ -3,14 +3,10 @@ import {CalendarDateSchema} from './master-schema';
 
 export const PrintJobStatusSchema = z.enum(['Received','Designing','AwaitingApproval','Approved','Printing','Finishing','Ready','Delivered','Cancelled']);
 
-const SpecificationsSchema = z.object({
-  size: z.string().trim().max(100).optional(),
-  material: z.string().trim().max(150).optional(),
-  gsm: z.string().trim().max(50).optional(),
-  colour: z.string().trim().max(100).optional(),
-  sides: z.string().trim().max(50).optional(),
-  finishing: z.string().trim().max(200).optional(),
-}).default({});
+const SpecificationsSchema = z.record(
+  z.string().trim().min(1).max(60),
+  z.string().trim().max(300)
+).refine(value => Object.keys(value).length <= 20, 'Use no more than 20 print-job details.').default({});
 
 export const CreatePrintJobSchema = z.object({
   customerId: z.string().trim().min(1).max(128),

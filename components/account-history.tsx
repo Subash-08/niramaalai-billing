@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {Download, ArrowUpRight} from 'lucide-react';
 import {useStore} from './store';
 import {money, roundedTotal, dateLabel, TODAY} from '@/lib/domain';
-import {Card, Btn, Badge, Field} from './ui';
+import {Card, Btn, Badge, Field, download} from './ui';
 
 export default function AccountHistory({
   id,
@@ -23,6 +23,7 @@ export default function AccountHistory({
   const {
     state,
     isLive,
+    notify,
     fetchCustomerStatementApi,
   } = useStore();
 
@@ -36,9 +37,11 @@ export default function AccountHistory({
   // Customer Statement Tab State
   const [statementData, setStatementData] = useState<any>(null);
   const [statementLoading, setStatementLoading] = useState(false);
+  const [statementError, setStatementError] = useState('');
   const [statementDateFrom, setStatementDateFrom] = useState('');
   const [statementDateTo, setStatementDateTo] = useState('');
   const [statementPage, setStatementPage] = useState(1);
+  const [statementExporting, setStatementExporting] = useState('');
 
   const bills = state.bills.filter((b) => b.customerId === id && b.kind !== 'Quotation');
   const refs = new Set(bills.map((b) => b.id));
@@ -47,6 +50,7 @@ export default function AccountHistory({
   useEffect(() => {
     if (isLive && tab === 'Statement') {
       setStatementLoading(true);
+      setStatementError('');
       fetchCustomerStatementApi(id, {
         fromDate: statementDateFrom || undefined,
         toDate: statementDateTo || undefined,
@@ -56,10 +60,14 @@ export default function AccountHistory({
         .then((res: any) => {
           setStatementData(res);
         })
-        .catch(() => {})
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : 'Failed to load customer statement.';
+          setStatementError(message);
+          notify(message);
+        })
         .finally(() => setStatementLoading(false));
     }
-  }, [isLive, id, tab, statementDateFrom, statementDateTo, statementPage, fetchCustomerStatementApi]);
+  }, [isLive, id, tab, statementDateFrom, statementDateTo, statementPage, fetchCustomerStatementApi, notify]);
 
   const customerEvents = [
     ...bills.map((b) => ({
@@ -81,6 +89,28 @@ export default function AccountHistory({
   ].sort((a, b) => b.date.localeCompare(a.date));
 
   const availableTabs = ['Overview', 'Statement', 'Activity timeline'];
+
+  async function downloadStatement(format: 'csv' | 'xlsx' | 'pdf') {
+    setStatementExporting(format);
+    try {
+      const query = new URLSearchParams({format});
+      if (statementDateFrom) query.set('fromDate', statementDateFrom);
+      if (statementDateTo) query.set('toDate', statementDateTo);
+      const response = await fetch(`/api/sales/customers/${encodeURIComponent(id)}/statement/export?${query.toString()}`, {cache: 'no-store'});
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || 'Customer statement export failed.');
+      }
+      const disposition = response.headers.get('content-disposition') || '';
+      const fileName = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `customer-statement.${format}`;
+      download(fileName, await response.blob());
+      notify(`${format.toUpperCase()} statement downloaded.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Customer statement export failed.');
+    } finally {
+      setStatementExporting('');
+    }
+  }
 
   return (
     <div className="stack spaced">
@@ -134,12 +164,7 @@ export default function AccountHistory({
           actions={
             <div style={{display: 'flex', gap: '0.5rem'}}>
               {(['csv', 'xlsx', 'pdf'] as const).map(format => (
-                <Btn key={format} secondary onClick={() => {
-                  const query = new URLSearchParams({format});
-                  if (statementDateFrom) query.set('fromDate', statementDateFrom);
-                  if (statementDateTo) query.set('toDate', statementDateTo);
-                  window.location.href = `/api/sales/customers/${id}/statement/export?${query.toString()}`;
-                }}><Download size={14} /> {format.toUpperCase()}</Btn>
+                <Btn key={format} secondary disabled={!!statementExporting} onClick={() => void downloadStatement(format)}><Download size={14} /> {statementExporting === format ? 'Preparing…' : format.toUpperCase()}</Btn>
               ))}
             </div>
           }
@@ -183,6 +208,8 @@ export default function AccountHistory({
 
           {statementLoading ? (
             <div className="body-pad muted">Loading customer statement…</div>
+          ) : statementError ? (
+            <div className="body-pad"><p className="error">{statementError}</p></div>
           ) : (
             <div className="table-wrap">
               <table>
@@ -239,7 +266,7 @@ export default function AccountHistory({
             </div>
           )}
 
-          {statementData?.pagination && statementData.pagination.totalPages > 1 && (
+          {statementData?.totalPages > 1 && (
             <div className="pagination toolbar" style={{marginTop: '1rem'}}>
               <Btn
                 secondary
@@ -249,12 +276,12 @@ export default function AccountHistory({
                 Previous
               </Btn>
               <span>
-                Page {statementPage} of {statementData.pagination.totalPages}
+                Page {statementPage} of {statementData.totalPages}
               </span>
               <Btn
                 secondary
-                disabled={statementPage >= statementData.pagination.totalPages}
-                onClick={() => setStatementPage((p) => Math.min(statementData.pagination.totalPages, p + 1))}
+                disabled={statementPage >= statementData.totalPages}
+                onClick={() => setStatementPage((p) => Math.min(statementData.totalPages, p + 1))}
               >
                 Next
               </Btn>

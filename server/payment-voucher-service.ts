@@ -27,7 +27,11 @@ const ListSchema = z.object({
   dateFrom: z.string().refine(isValidCalendarDate).optional(),
   dateTo: z.string().refine(isValidCalendarDate).optional(),
   search: z.string().trim().max(100).optional(),
-}).refine(v => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, 'Date range is reversed.');
+  method: z.enum(['Cash', 'UPI', 'BankTransfer', 'Card', 'Cheque']).optional(),
+  minAmountPaise: z.coerce.number().int().min(0).optional(),
+  maxAmountPaise: z.coerce.number().int().min(0).optional(),
+}).refine(v => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, 'Date range is reversed.')
+  .refine(v => v.minAmountPaise == null || v.maxAmountPaise == null || v.minAmountPaise <= v.maxAmountPaise, 'Amount range is reversed.');
 
 function escapeRegex(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -64,6 +68,11 @@ export async function createPaidVoucher(db: Db, identity: Identity, raw: unknown
 export async function listPaidVouchers(db: Db, identity: Identity, raw: unknown) {
   const q = ListSchema.parse(raw); const filter: Record<string, any> = {tenantId: identity.tenantId};
   if (q.dateFrom || q.dateTo) filter.date = {...(q.dateFrom && {$gte: q.dateFrom}), ...(q.dateTo && {$lte: q.dateTo})};
+  if (q.method) filter.method = q.method;
+  if (q.minAmountPaise != null || q.maxAmountPaise != null) filter.amountPaise = {
+    ...(q.minAmountPaise != null && {$gte: q.minAmountPaise}),
+    ...(q.maxAmountPaise != null && {$lte: q.maxAmountPaise}),
+  };
   if (q.search) { const s = escapeRegex(q.search); filter.$or = [{voucherNumber: {$regex: s, $options: 'i'}}, {payeeName: {$regex: s, $options: 'i'}}, {purpose: {$regex: s, $options: 'i'}}, {reference: {$regex: s, $options: 'i'}}]; }
   const skip = (q.page - 1) * q.limit;
   const [items, total, sumAgg] = await Promise.all([

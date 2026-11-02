@@ -35,7 +35,7 @@ const CommonLine = z.object({
     finishing: z.string().trim().max(200).optional(),
     deliveryDate: CalendarDate.optional(),
     notes: z.string().trim().max(500).optional(),
-  }).optional().default({}),
+  }).catchall(z.string().trim().max(300)).refine(value => Object.keys(value).length <= 20, 'Use no more than 20 print specifications.').optional().default({}),
   quantity: z.number().int().min(1).max(100000),
   unitRatePaise: Paise,
   discountType: DiscountType.default('Percentage'),
@@ -47,12 +47,12 @@ const CommonLine = z.object({
 
 export const SaleLineInputSchema = z.discriminatedUnion('lineType', [
   CommonLine.extend({
-    lineType: z.literal('Product'), productId: Id, hsn: z.string().trim().min(1).max(20),
+    lineType: z.literal('Product'), productId: Id, hsn: z.string().trim().max(20).default(''),
     stockAllocations: z.array(SaleStockAllocationInputSchema).max(100).default([]),
     warrantyMonths: z.number().int().min(0).max(240).default(0),
   }),
   CommonLine.extend({
-    lineType: z.literal('Service'), serviceId: OptionalId, sac: z.string().trim().min(1).max(20),
+    lineType: z.literal('Service'), serviceId: OptionalId, sac: z.string().trim().max(20).default(''),
     serviceJobId: OptionalId,
     warrantyMonths: z.number().int().min(0).max(240).default(0),
   }),
@@ -67,7 +67,7 @@ export const SaleLineInputSchema = z.discriminatedUnion('lineType', [
     serials: z.array(z.string()).default([]),
   }),
   CommonLine.extend({
-    lineType: z.literal('Charge'), sac: z.string().trim().min(1).max(20),
+    lineType: z.literal('Charge'), sac: z.string().trim().max(20).default(''),
   }),
 ]);
 
@@ -162,10 +162,10 @@ export const IssueInvoiceSchema = z.object({
 export const CreateQuotationSchema = InvoiceDraftBase
   .omit({reservationId: true})
   .extend({
-    validUntil: CalendarDate, quotationDate: CalendarDate.default(() => todayInKolkata()),
+    validUntil: CalendarDate.optional(), quotationDate: CalendarDate.default(() => todayInKolkata()),
   })
   .superRefine(lineValidation)
-  .refine(v => v.validUntil >= v.quotationDate, {message: 'Expiry cannot precede quotation date.', path: ['validUntil']});
+  .refine(v => !v.validUntil || v.validUntil >= v.quotationDate, {message: 'Expiry cannot precede quotation date.', path: ['validUntil']});
 
 export const ConvertQuotationSchema = z.object({quotationId: Id, expectedVersion: z.number().int().min(1), invoiceDate: CalendarDate.default(() => todayInKolkata()), idempotencyKey: IdempotencyKey});
 export const UpdateQuotationSchema = z.object({expectedVersion: z.number().int().min(1), quotation: CreateQuotationSchema});
@@ -255,7 +255,9 @@ export const ReverseCustomerRefundSchema = z.object({
 
 export const CustomerStatementQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(100000).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
+  // Interactive views use small pages; authenticated statement exports are
+  // intentionally capped at 5,000 rows by their endpoint.
+  limit: z.coerce.number().int().min(1).max(5000).default(50),
   fromDate: CalendarDate.optional(),
   toDate: CalendarDate.optional(),
 }).refine(v => !v.fromDate || !v.toDate || v.fromDate <= v.toDate, {message: 'Date range is reversed.'});
@@ -267,7 +269,11 @@ export const CustomerReceiptsListQuerySchema = z.object({
   dateFrom: CalendarDate.optional(),
   dateTo: CalendarDate.optional(),
   search: z.string().trim().max(100).optional(),
-}).refine(v => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, {message: 'Date range is reversed.'});
+  method: z.enum(['Cash', 'UPI', 'BankTransfer', 'Card', 'Cheque']).optional(),
+  minAmountPaise: z.coerce.number().int().min(0).optional(),
+  maxAmountPaise: z.coerce.number().int().min(0).optional(),
+}).refine(v => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, {message: 'Date range is reversed.'})
+  .refine(v => v.minAmountPaise == null || v.maxAmountPaise == null || v.minAmountPaise <= v.maxAmountPaise, {message: 'Amount range is reversed.'});
 
 export type CreateInvoiceDraftInput = z.infer<typeof CreateInvoiceDraftSchema>;
 export type IssueInvoiceInput = z.infer<typeof IssueInvoiceSchema>;

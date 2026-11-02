@@ -55,6 +55,7 @@ export default function Workspace(){
     case 'payments':return <Payments id={id}/>;
     case 'dues':return <CustomerDues/>;
     case 'sales':return id==='new'?<DocumentComposer key={routeKey}/>:<Documents id={id}/>;
+    case 'quotations':return id==='new'?<DocumentComposer key={routeKey} quotation/>:<Documents id={id} quotation/>;
     case 'templates':return <Templates/>;
     case 'service-catalog':return <ServiceCatalog/>;
     case 'print-jobs':return <PrintJobs/>;

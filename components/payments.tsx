@@ -1,7 +1,5 @@
 'use client';
 
-import Link from 'next/link';
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ArrowDownLeft,
@@ -39,7 +37,7 @@ export default function Payments({ id }: { id?: string }) {
     fetchPaymentVouchersPage,
   } = useStore();
 
-  const [activeTab, setActiveTab] = useState<'received' | 'paid'>('received');
+  const [activeTab, setActiveTab] = useState<'received' | 'paid'>('paid');
 
 
   // Server summary totals (never bound to single page)
@@ -65,6 +63,9 @@ export default function Payments({ id }: { id?: string }) {
   const [receiptDateFrom, setReceiptDateFrom] = useState('');
   const [receiptDateTo, setReceiptDateTo] = useState('');
   const [receiptCustomerFilter, setReceiptCustomerFilter] = useState('');
+  const [receiptMethod, setReceiptMethod] = useState('');
+  const [receiptMinAmount, setReceiptMinAmount] = useState('');
+  const [receiptMaxAmount, setReceiptMaxAmount] = useState('');
   const [loadingReceipts, setLoadingReceipts] = useState(false);
 
   // Voucher list & pagination state
@@ -76,6 +77,9 @@ export default function Payments({ id }: { id?: string }) {
   const [voucherSearch, setVoucherSearch] = useState('');
   const [voucherDateFrom, setVoucherDateFrom] = useState('');
   const [voucherDateTo, setVoucherDateTo] = useState('');
+  const [voucherMethod, setVoucherMethod] = useState('');
+  const [voucherMinAmount, setVoucherMinAmount] = useState('');
+  const [voucherMaxAmount, setVoucherMaxAmount] = useState('');
   const [loadingVouchers, setLoadingVouchers] = useState(false);
 
   // Modals
@@ -92,6 +96,11 @@ export default function Payments({ id }: { id?: string }) {
       setRecordReceiptOpen(true);
     }
   }, [requestedInvoiceId, requestedCustomerId]);
+
+  useEffect(() => {
+    if (id?.startsWith('RCP')) setActiveTab('received');
+    if (id?.startsWith('PV')) setActiveTab('paid');
+  }, [id]);
 
   // Load server-side summary totals
   const refreshSummary = useCallback(async () => {
@@ -116,6 +125,9 @@ export default function Payments({ id }: { id?: string }) {
         customerId: receiptCustomerFilter || undefined,
         dateFrom: receiptDateFrom || undefined,
         dateTo: receiptDateTo || undefined,
+        method: receiptMethod || undefined,
+        minAmountPaise: receiptMinAmount ? Math.round(Number(receiptMinAmount) * 100) : undefined,
+        maxAmountPaise: receiptMaxAmount ? Math.round(Number(receiptMaxAmount) * 100) : undefined,
       });
       setReceipts(res.items || []);
       setReceiptsTotal(res.total || 0);
@@ -125,7 +137,7 @@ export default function Payments({ id }: { id?: string }) {
     } finally {
       setLoadingReceipts(false);
     }
-  }, [fetchCustomerReceiptsPage, receiptPage, receiptLimit, receiptSearch, receiptCustomerFilter, receiptDateFrom, receiptDateTo, isLive, notify]);
+  }, [fetchCustomerReceiptsPage, receiptPage, receiptLimit, receiptSearch, receiptCustomerFilter, receiptDateFrom, receiptDateTo, receiptMethod, receiptMinAmount, receiptMaxAmount, isLive, notify]);
 
   // Load Vouchers with real pagination
   const loadVouchers = useCallback(async () => {
@@ -137,6 +149,9 @@ export default function Payments({ id }: { id?: string }) {
         search: voucherSearch || undefined,
         dateFrom: voucherDateFrom || undefined,
         dateTo: voucherDateTo || undefined,
+        method: voucherMethod || undefined,
+        minAmountPaise: voucherMinAmount ? Math.round(Number(voucherMinAmount) * 100) : undefined,
+        maxAmountPaise: voucherMaxAmount ? Math.round(Number(voucherMaxAmount) * 100) : undefined,
       });
       setVouchers(res.items || []);
       setVouchersTotal(res.total || 0);
@@ -146,7 +161,7 @@ export default function Payments({ id }: { id?: string }) {
     } finally {
       setLoadingVouchers(false);
     }
-  }, [fetchPaymentVouchersPage, voucherPage, voucherLimit, voucherSearch, voucherDateFrom, voucherDateTo, isLive, notify]);
+  }, [fetchPaymentVouchersPage, voucherPage, voucherLimit, voucherSearch, voucherDateFrom, voucherDateTo, voucherMethod, voucherMinAmount, voucherMaxAmount, isLive, notify]);
 
   useEffect(() => {
     refreshSummary();
@@ -178,37 +193,6 @@ export default function Payments({ id }: { id?: string }) {
       <PageHead
         title="Payments & receipts"
         description="Record customer receipts and money paid for business expenses, with printable records."
-        actions={
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <Btn
-              onClick={() => {
-                setRecordReceiptOpen(true);
-              }}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <ArrowDownLeft size={16} />
-              Record receipt
-            </Btn>
-            <Btn
-              secondary
-              onClick={() => {
-                setRecordVoucherOpen(true);
-              }}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <ArrowUpRight size={16} />
-              Record money paid
-            </Btn>
-            <Link
-              href="/sales/new?taxType=non-gst"
-              className="btn secondary"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <Plus size={16} />
-              Non-GST invoice
-            </Link>
-          </div>
-        }
       />
 
       {/* Summary Cards */}
@@ -224,27 +208,7 @@ export default function Payments({ id }: { id?: string }) {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border, #e5e7eb)', marginBottom: '1.5rem' }}>
-        <button
-          type="button"
-          onClick={() => setActiveTab('received')}
-          style={{
-            padding: '0.75rem 1.25rem',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'received' ? '2px solid var(--primary, #6366f1)' : '2px solid transparent',
-            color: activeTab === 'received' ? 'var(--primary, #6366f1)' : 'var(--text-muted, #6b7280)',
-            fontWeight: 600,
-            fontSize: '0.95rem',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}
-        >
-          <ArrowDownLeft size={18} />
-          Money received (Customer Receipts)
-        </button>
+      <div className="payments-tabs">
         <button
           type="button"
           onClick={() => setActiveTab('paid')}
@@ -265,11 +229,38 @@ export default function Payments({ id }: { id?: string }) {
           <ArrowUpRight size={18} />
           Money paid
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('received')}
+          style={{
+            padding: '0.75rem 1.25rem',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === 'received' ? '2px solid var(--primary, #6366f1)' : '2px solid transparent',
+            color: activeTab === 'received' ? 'var(--primary, #6366f1)' : 'var(--text-muted, #6b7280)',
+            fontWeight: 600,
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <ArrowDownLeft size={18} />
+          Money received (Customer Receipts)
+        </button>
+        <div className="payments-tab-action">
+          {activeTab === 'paid' ? (
+            <Btn onClick={() => setRecordVoucherOpen(true)}><ArrowUpRight size={16} />Record money paid</Btn>
+          ) : (
+            <Btn onClick={() => setRecordReceiptOpen(true)}><ArrowDownLeft size={16} />Record receipt</Btn>
+          )}
+        </div>
       </div>
 
       {/* Tab 1: Money Received (Customer Receipts) */}
       {activeTab === 'received' && (
-        <Card title="Customer Receipts" sub="Single-invoice settlement receipts recorded for customer billing.">
+        <Card className="payment-records-card" title="Customer Receipts" sub="Single-invoice settlement receipts recorded for customer billing.">
           {/* Filters Bar */}
           <div
             style={{
@@ -331,6 +322,12 @@ export default function Payments({ id }: { id?: string }) {
                 onClear={() => { setReceiptCustomerFilter(''); setReceiptPage(1); }}
               />
             </div>
+            <select aria-label="Receipt payment method" value={receiptMethod} onChange={(e) => { setReceiptMethod(e.target.value); setReceiptPage(1); }}>
+              <option value="">All payment methods</option>
+              <option value="Cash">Cash</option><option value="UPI">GPay / UPI</option><option value="BankTransfer">Bank transfer</option><option value="Card">Card</option><option value="Cheque">Cheque</option>
+            </select>
+            <input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Min amount" aria-label="Minimum receipt amount" value={receiptMinAmount} onChange={(e) => { setReceiptMinAmount(e.target.value); setReceiptPage(1); }} />
+            <input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Max amount" aria-label="Maximum receipt amount" value={receiptMaxAmount} onChange={(e) => { setReceiptMaxAmount(e.target.value); setReceiptPage(1); }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)' }}>From:</span>
               <input
@@ -366,6 +363,9 @@ export default function Payments({ id }: { id?: string }) {
                 setReceiptCustomerFilter('');
                 setReceiptDateFrom('');
                 setReceiptDateTo('');
+                setReceiptMethod('');
+                setReceiptMinAmount('');
+                setReceiptMaxAmount('');
                 setReceiptPage(1);
               }}
             >
@@ -538,7 +538,7 @@ export default function Payments({ id }: { id?: string }) {
 
       {/* Tab 2: Money Paid (Payment Vouchers) */}
       {activeTab === 'paid' && (
-        <Card title="Money paid" sub="Record business expenses paid by cash, UPI, bank transfer or card.">
+        <Card className="payment-records-card" title="Money paid" sub="Record business expenses paid by cash, UPI, bank transfer or card.">
           {/* Filters Bar */}
           <div
             style={{
@@ -567,6 +567,12 @@ export default function Payments({ id }: { id?: string }) {
                 }}
               />
             </div>
+            <select aria-label="Money paid method" value={voucherMethod} onChange={(e) => { setVoucherMethod(e.target.value); setVoucherPage(1); }}>
+              <option value="">All payment methods</option>
+              <option value="Cash">Cash</option><option value="UPI">GPay / UPI</option><option value="BankTransfer">Bank transfer</option><option value="Card">Card</option><option value="Cheque">Cheque</option>
+            </select>
+            <input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Min amount" aria-label="Minimum money paid amount" value={voucherMinAmount} onChange={(e) => { setVoucherMinAmount(e.target.value); setVoucherPage(1); }} />
+            <input className="payment-amount-filter" type="number" min="0" step="0.01" placeholder="Max amount" aria-label="Maximum money paid amount" value={voucherMaxAmount} onChange={(e) => { setVoucherMaxAmount(e.target.value); setVoucherPage(1); }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)' }}>From:</span>
               <input
@@ -601,6 +607,10 @@ export default function Payments({ id }: { id?: string }) {
                 setVoucherSearch('');
                 setVoucherDateFrom('');
                 setVoucherDateTo('');
+                setVoucherMethod('');
+                setVoucherMinAmount('');
+                setVoucherMaxAmount('');
+                setVoucherPage(1);
               }}
             >
               Reset

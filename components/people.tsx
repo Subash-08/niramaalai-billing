@@ -105,6 +105,8 @@ export function PersonForm({
 
   async function handleArchive() {
     if (!existing?.id) return;
+    const recordLabel = supplier ? 'supplier' : 'customer';
+    if (!window.confirm(`Archive this ${recordLabel}? Existing invoices and payment history will be kept, but the ${recordLabel} will be hidden from new entries.`)) return;
     setBusy(true);
     try {
       const ok = supplier
@@ -239,7 +241,7 @@ export function PersonForm({
             </Btn>
           ) : existing ? (
             <Btn secondary danger onClick={handleArchive} disabled={busy}>
-              <Archive size={15} /> Archive
+              <Archive size={15} /> Archive {supplier ? 'supplier' : 'customer'}
             </Btn>
           ) : null}
           <Btn secondary onClick={onClose} disabled={busy}>

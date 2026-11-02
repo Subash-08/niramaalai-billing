@@ -96,3 +96,40 @@ body{font-size:16px}.field>span,.badge{font-size:14px}.nav-label,.eyebrow,.brand
 @media(max-width:900px){
   .sidebar.open .brand{padding-right:44px}
 }
+
+/* Payment actions follow the selected ledger tab and records keep readable
+   space around filters, tables and pagination. */
+.payments-tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line);margin-bottom:24px;flex-wrap:wrap}
+.payments-tab-action{margin-left:auto;padding:0 0 8px 16px}
+.payment-records-card>div:not(.card-head),.payment-records-card>.empty{margin-left:20px;margin-right:20px}
+.payment-records-card>.table-wrap{border:1px solid var(--line);border-radius:8px}
+.payment-records-card>.card-head+div{margin-top:0}
+.payment-records-card select,.payment-records-card .payment-amount-filter{min-height:38px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:7px 10px;color:var(--ink)}
+.payment-records-card .payment-amount-filter{width:118px}
+.reference-parties.quotation-party{grid-template-columns:1fr}
+.quotation-party>div{min-height:24mm}
+
+/* Archive is reversible but consequential, so keep it visibly red without
+   requiring hover. */
+.btn.secondary.danger{background:#fff5f5!important;border-color:#dc6a72!important;color:#a61f2b!important;opacity:1}
+.btn.secondary.danger:hover{background:#d95360!important;border-color:#d95360!important;color:#fff!important}
+
+.print-job-specifications{border:1px solid var(--line);border-radius:10px;padding:16px;background:#fffdf6}
+.print-job-specification-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px}
+.print-job-specification-head strong,.print-job-specification-head small{display:block}
+.print-job-specification-head small{margin-top:3px}
+.print-job-specification-head select{min-width:210px}
+.print-job-specification-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.print-job-specification-input{display:flex;align-items:center;gap:6px}
+.print-job-specification-input input{width:100%}
+.print-job-specification-input .icon-btn{flex:0 0 auto;border:1px solid var(--line)}
+.print-job-specification-empty{padding:12px;border:1px dashed #d8c98e;border-radius:7px;font-size:13px}
+.print-job-custom-detail{display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.print-job-custom-detail input{flex:1}
+@media(max-width:650px){
+  .payments-tab-action{width:100%;margin-left:0;padding:8px 0 12px}
+  .payments-tab-action .btn{width:100%}
+  .payment-records-card>div:not(.card-head),.payment-records-card>.empty{margin-left:12px;margin-right:12px}
+  .print-job-specification-head,.print-job-custom-detail{align-items:stretch;flex-direction:column}
+  .print-job-specification-grid{grid-template-columns:1fr}
+}

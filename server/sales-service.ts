@@ -69,7 +69,7 @@ export type SaleLineDocument = {
   description: string;
   details: string;
   unit: string;
-  printSpecifications?: {size?: string; material?: string; gsm?: string; colour?: string; sides?: string; finishing?: string; deliveryDate?: string; notes?: string};
+  printSpecifications?: {size?: string; material?: string; gsm?: string; colour?: string; sides?: string; finishing?: string; deliveryDate?: string; notes?: string; [key: string]: string | undefined};
   hsn?: string;
   quantity: number;
   unitRatePaise: number;
@@ -108,7 +108,7 @@ export type QuotationDocument = {
   invoiceKind: 'Sale' | 'Service';
   businessCategory: 'NewGoods' | 'UsedGoods' | 'Service';
   quotationDate: string;
-  validUntil: string;
+  validUntil?: string;
   inclusive: boolean;
   taxMode: SaleTaxMode;
   placeOfSupply: string;
@@ -339,13 +339,23 @@ async function createQuotationWithinTransaction(db: Db, identity: Identity, inpu
   const tenantId = identity.tenantId;
   const session = salesTransaction.getStore();
   const customer = await resolveCustomer(db, tenantId, input.customerId, session);
-  await resolveTemplate(db, tenantId, input.templateId, input.templateRevision, session);
+  const quotationTemplate = await resolveTemplate(db, tenantId, input.templateId, input.templateRevision, session);
+  if (!/quotation|quote/i.test(`${quotationTemplate.snapshot?.title || ''} ${quotationTemplate.snapshot?.name || ''}`)) throw new AppError(400, 'Select a quotation template. Invoice templates cannot be used for quotations.');
   await assertSupplyTaxTreatment(db, tenantId, input, session);
   const lines = await buildSaleLines(db, tenantId, input.lines, input.inclusive, input.taxMode, session);
   const totals = calculateSaleDocumentTotals(lines, input.roundOffPaise);
   const now = new Date();
-  const yearStr = input.quotationDate.slice(0, 4);
-  const quotationNumber = await nextTenantSequence(db, tenantId, 'Quotation', yearStr, 'QUO', session);
+  const seller = await col(db, 'companySettings').findOne({tenantId}, {session});
+  const yearStr = deriveFinancialYear(input.quotationDate);
+  const quotationFormat = {startNumber: seller?.quotationStartNumber || 1, padding: seller?.invoiceNumberPadding ?? 4,
+    includeYear: seller?.invoiceIncludeFinancialYear !== false, separator: (seller?.invoiceNumberSeparator ?? '-') as '-' | '/' | '_' | ''};
+  let quotationNumber = '';
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    quotationNumber = await nextTenantSequence(db, tenantId, 'Quotation', yearStr, seller?.quotationPrefix || 'QUO', session, quotationFormat);
+    if (!await col(db, 'quotations').findOne({tenantId, quotationNumber}, {session, projection: {_id: 1}})) break;
+    quotationNumber = '';
+  }
+  if (!quotationNumber) throw new AppError(409, 'Could not find an unused quotation number. Move the quotation starting number forward in Company settings.');
   const quotationId = uid('QUO');
   const billTo: CustomerAddressSnapshot = {
     name: customer.name, phone: customer.phone || '', address: customer.address || '',
@@ -383,11 +393,14 @@ export async function convertQuotationToDraft(
     const quotation = await col<QuotationDocument>(db, 'quotations').findOne({_id: input.quotationId, tenantId}, {session});
     if (!quotation) throw new AppError(404, 'Quotation not found.');
     if (quotation.convertedToInvoiceId) throw new AppError(409, 'Quotation already has a linked invoice draft. Open that invoice.');
-    if (quotation.validUntil < input.invoiceDate) throw new AppError(400, 'Quotation expired. Update validity before converting.');
+    if (quotation.validUntil && quotation.validUntil < input.invoiceDate) throw new AppError(400, 'Quotation expired. Update validity before converting.');
     if (quotation.version !== input.expectedVersion) throw new AppError(409, 'Quotation was modified by another session. Please reload.');
     if (!['Draft', 'Sent', 'Accepted'].includes(quotation.status)) throw new AppError(400, `Quotation is ${quotation.status} and cannot be converted.`);
     const now = new Date();
     const invoiceId = uid('INV');
+    const invoiceTemplate = await col(db, 'invoiceTemplates').findOne({tenantId, status: 'Active', title: {$not: /quotation|quote/i}}, {session, sort: {isDefault: -1, createdAt: 1}})
+      || await col(db, 'invoiceTemplates').findOne({tenantId, status: 'Active', name: {$not: /quotation|quote/i}}, {session, sort: {isDefault: -1, createdAt: 1}});
+    if (!invoiceTemplate) throw new AppError(409, 'Create an invoice template before converting this quotation.');
     const invoiceDoc: InvoiceDocument = {
       _id: invoiceId, tenantId, version: 1, status: 'Draft',
       invoiceDate: input.invoiceDate, dueDate: undefined,
@@ -395,7 +408,7 @@ export async function convertQuotationToDraft(
       billTo: quotation.billTo, shipTo: quotation.shipTo,
       invoiceKind: quotation.invoiceKind, businessCategory: quotation.businessCategory,
       inclusive: quotation.inclusive, taxMode: quotation.taxMode, placeOfSupply: quotation.placeOfSupply,
-      templateId: quotation.templateId, templateRevision: quotation.templateRevision,
+      templateId: invoiceTemplate._id, templateRevision: invoiceTemplate.currentRevision,
       sourceQuotationId: quotation._id, serviceJobId: quotation.serviceJobId, enquiryId: quotation.sourceEnquiryId,
       orderReference: quotation.orderReference, deliveryNote: '', dispatchThrough: '', supplyDate: input.invoiceDate,
       vehicleNumber: '', reverseCharge: false, notes: quotation.notes,
@@ -409,7 +422,7 @@ export async function convertQuotationToDraft(
     await col<InvoiceDocument>(db, 'invoices').insertOne(invoiceDoc, {session});
     const linked = await col<QuotationDocument>(db, 'quotations').updateOne(
       {_id: input.quotationId, tenantId, version: quotation.version},
-      {$set: {convertedToInvoiceId: invoiceId, version: quotation.version + 1, updatedAt: now, updatedBy: identity.userId}},
+      {$set: {convertedToInvoiceId: invoiceId, status: 'Converted', version: quotation.version + 1, updatedAt: now, updatedBy: identity.userId}},
       {session},
     );
     if (linked.matchedCount !== 1) throw new AppError(409, 'Quotation changed during conversion.');
@@ -433,7 +446,8 @@ export async function updateQuotation(db: Db, identity: Identity, id: string, ra
     }
     const tenantId = identity.tenantId;
     const customer = await resolveCustomer(db, tenantId, input.quotation.customerId, session);
-    await resolveTemplate(db, tenantId, input.quotation.templateId, input.quotation.templateRevision, session);
+    const quotationTemplate = await resolveTemplate(db, tenantId, input.quotation.templateId, input.quotation.templateRevision, session);
+    if (!/quotation|quote/i.test(`${quotationTemplate.snapshot?.title || ''} ${quotationTemplate.snapshot?.name || ''}`)) throw new AppError(400, 'Select a quotation template. Invoice templates cannot be used for quotations.');
     const lines = await buildSaleLines(db, tenantId, input.quotation.lines, input.quotation.inclusive, input.quotation.taxMode, session);
     const totals = calculateSaleDocumentTotals(lines, input.quotation.roundOffPaise);
     const now = new Date();
@@ -894,7 +908,10 @@ async function listSalesDocuments(db: Db, identity: Identity, raw: unknown, kind
 }
 
 export const listInvoices = (db: Db, identity: Identity, raw: unknown) => listSalesDocuments(db, identity, raw, 'invoices');
-export const listQuotations = (db: Db, identity: Identity, raw: unknown) => listSalesDocuments(db, identity, raw, 'quotations');
+export async function listQuotations(db: Db, identity: Identity, raw: unknown) {
+  await col(db, 'quotations').updateMany({tenantId: identity.tenantId, status: {$in: ['Draft', 'Sent']}, convertedToInvoiceId: {$exists: false}, validUntil: {$type: 'string', $lt: todayInKolkata()}}, {$set: {status: 'Expired', updatedAt: new Date()}});
+  return listSalesDocuments(db, identity, raw, 'quotations');
+}
 
 // 7. Get Invoice
 export async function getInvoice(db: Db, identity: Identity, invoiceId: string) {
@@ -909,6 +926,7 @@ export async function getInvoice(db: Db, identity: Identity, invoiceId: string) 
 
 // 8. Get Quotation
 export async function getQuotation(db: Db, identity: Identity, quotationId: string) {
+  await col(db, 'quotations').updateOne({_id: quotationId, tenantId: identity.tenantId, status: {$in: ['Draft', 'Sent']}, convertedToInvoiceId: {$exists: false}, validUntil: {$type: 'string', $lt: todayInKolkata()}}, {$set: {status: 'Expired', updatedAt: new Date()}});
   const quotation = await col<QuotationDocument>(db, 'quotations').findOne({_id: quotationId, tenantId: identity.tenantId});
   if (!quotation) throw new AppError(404, 'Quotation not found.');
   return {quotation};

@@ -6,6 +6,7 @@ import {Copy, Pencil, Printer, ArrowUp, ArrowDown, Check, FileText, Plus, Phone,
 import {InvoiceTemplate, templateFields, extensionSeed} from '@/lib/extensions';
 import {Bill, uid, money, totals, lineTotal, dateLabel, paid, balance} from '@/lib/domain';
 import {useStore} from './store';
+import {nextDate} from '@/lib/closing';
 import {PageHead, Card, Btn, Modal, Field, Badge} from './ui';
 
 const invoiceDate = (value?: string) => {
@@ -15,6 +16,7 @@ const invoiceDate = (value?: string) => {
 };
 
 const isNonGstTemplate = (template: InvoiceTemplate) => /non[\s-]?gst/i.test(`${template.title || ''} ${template.name || ''}`);
+const isQuotationTemplate = (template: InvoiceTemplate) => /quotation|quote/i.test(`${template.title || ''} ${template.name || ''}`);
 
 function buildNonGstTemplate(base: InvoiceTemplate): InvoiceTemplate {
   const columns = structuredClone(base.columns).map(column => ({
@@ -46,6 +48,15 @@ function buildNonGstTemplate(base: InvoiceTemplate): InvoiceTemplate {
   };
 }
 
+function buildQuotationTemplate(base: InvoiceTemplate): InvoiceTemplate {
+  return {
+    ...structuredClone(base), id: '', name: 'Quotation', title: 'QUOTATION', isDefault: false,
+    fields: {...base.fields, shipping: false, transportMode: false, vehicleNumber: false, supplyDate: false,
+      payments: false, bank: false, receiverSignature: false, due: true, reference: true},
+    terms: base.terms || 'Prices are valid until the date shown above.\nWork begins after customer approval.\nFinal quantities or specifications may change the quoted total.',
+  };
+}
+
 function ReferenceInvoice({bill, template, state, supplier, isLive}: {bill: Bill; template: InvoiceTemplate; state: any; supplier?: {name:string;address:string;phone:string;gst:string}; isLive:boolean}) {
   const f = template.fields || {};
   const seller = bill.shopSnapshot || state.settings;
@@ -62,7 +73,7 @@ function ReferenceInvoice({bill, template, state, supplier, isLive}: {bill: Bill
   const itemLines = f.packing ? bill.lines.filter(line => !packingLines.includes(line)) : bill.lines;
   const publicNumber = (bill as any).invoiceNumber || (bill as any).quotationNumber || bill.id;
   const automaticTitle = bill.kind === 'Quotation' ? 'QUOTATION' : isNonGst ? 'NON-GST INVOICE' : bill.kind === 'Service' ? (sum.tax > 0 ? 'SERVICE TAX INVOICE' : 'SERVICE INVOICE') : sum.tax > 0 ? 'TAX INVOICE' : 'CASH BILL';
-  const title = isNonGst
+  const title = bill.kind === 'Quotation' ? 'QUOTATION' : isNonGst
     ? (/non[\s-]?gst/i.test(template.title || '') ? template.title : 'NON-GST INVOICE')
     : template.title || automaticTitle;
   const headerReserve = template.headerMode === 'hidden' ? 0 : template.topReserveMm;
@@ -139,17 +150,20 @@ function ReferenceInvoice({bill, template, state, supplier, isLive}: {bill: Bill
       <div className="reference-title"><span>{title}</span>{pageLines.length > 1 && <small>Page {pageIndex + 1} of {pageLines.length}</small>}</div>
       {f.shopGst && !isNonGst && <div className="reference-seller-gst">GSTIN: {seller.gst || '—'}</div>}
       <div className="reference-body">
-        <section className="reference-meta-grid">
+        {bill.kind === 'Quotation' ? <section className="reference-meta-grid quotation-meta-grid">
+          <div><b>{seller.quotationNumberLabel || 'Quotation No'}</b><span>{f.number ? publicNumber : ''}</span></div><div><b>Quotation Date</b><span>{f.date ? invoiceDate(bill.date) : ''}</span></div>
+          <div><b>Valid Until</b><span>{f.due ? (bill.due ? invoiceDate(bill.due) : 'No expiry') : ''}</span></div><div><b>Reference</b><span>{f.reference ? bill.orderRef || '—' : ''}</span></div>
+        </section> : <section className="reference-meta-grid">
           <div><b>{seller.invoiceNumberLabel || 'Invoice No'}</b><span>{f.number ? publicNumber : ''}</span></div><div><b>Transport Mode</b><span>{f.transportMode ? bill.dispatch || '—' : ''}</span></div>
           <div><b>Invoice Date</b><span>{f.date ? invoiceDate(bill.date) : ''}</span></div><div><b>Vehicle Number</b><span>{f.vehicleNumber ? bill.vehicleNumber || '—' : ''}</span></div>
           {!isNonGst && <><div><b>Reverse Charge</b><span>{f.reverseCharge ? bill.reverseCharge ? 'Yes' : 'No' : ''}</span></div><div><b>Date of Supply</b><span>{f.supplyDate ? invoiceDate(bill.supplyDate || bill.date) : ''}</span></div></>}
           <div><b>State</b><span className="reference-state-value">{f.stateDetails && <><span>{seller.state || '—'}</span>{seller.stateCode && !isNonGst && <><strong>State Code</strong><span>{seller.stateCode}</span></>}</>}</span></div>
           {!isNonGst ? <div><b>Place of Supply</b><span>{f.destination ? bill.placeOfSupply || '—' : ''}</span></div> : <div />}
-        </section>
-        <section className="reference-parties">
+        </section>}
+        {bill.kind === 'Quotation' ? <section className="reference-parties quotation-party"><div><h3>QUOTATION FOR</h3>{partyLines(billTo, !!f.customerGst && !isNonGst).map((line, index) => <p key={index} className={index === 0 ? 'party-name' : ''}>{line}</p>)}</div></section> : <section className="reference-parties">
           <div><h3>BILL TO PARTY</h3>{partyLines(billTo, !!f.customerGst && !isNonGst).map((line, index) => <p key={index} className={index === 0 ? 'party-name' : ''}>{line}</p>)}</div>
           <div><h3>SHIP TO PARTY</h3>{f.shipping ? partyLines(shipTo, false).map((line, index) => <p key={index} className={index === 0 ? 'party-name' : ''}>{line}</p>) : <p>Same as bill to</p>}</div>
-        </section>
+        </section>}
         <section className="reference-items-wrap" style={{minHeight: `${calibratedItemHeight}mm`}}>
           <table className="reference-items"><colgroup>{visibleColumns.map(column => <col key={column.id} style={column.width ? {width: `${column.width}%`} : undefined} />)}</colgroup><thead><tr>{visibleColumns.map(column => <th key={column.id} style={{textAlign: column.align}}>{column.label}</th>)}</tr></thead>
             <tbody>{lines.map(({line, index}) => <tr key={line.clientLineKey || index}>{visibleColumns.map(column => <td key={column.id} style={{textAlign: column.align}}>{cell(line, column.id, index)}</td>)}</tr>)}
@@ -159,11 +173,11 @@ function ReferenceInvoice({bill, template, state, supplier, isLive}: {bill: Bill
         {!isLastPage && <div className="reference-continued">Continued on page {pageIndex + 2}</div>}
         {isLastPage && <><section className="reference-settlement">
           <div className="reference-settlement-left">
-            {f.bank && <div className="reference-bank"><p><b>Bank</b><span>{seller.bank || '—'}</span></p><p><b>Name</b><span>{seller.name || '—'}</span></p><p><b>A/C No.</b><span>{seller.account || '—'}</span></p><p><b>Branch</b><span>{seller.bankBranch || '—'}</span></p><p><b>IFSC Code</b><span>{seller.ifsc || '—'}</span></p></div>}
+            {f.bank && bill.kind !== 'Quotation' && <div className="reference-bank"><p><b>Bank</b><span>{seller.bank || '—'}</span></p><p><b>Name</b><span>{seller.name || '—'}</span></p><p><b>A/C No.</b><span>{seller.account || '—'}</span></p><p><b>Branch</b><span>{seller.bankBranch || '—'}</span></p><p><b>IFSC Code</b><span>{seller.ifsc || '—'}</span></p></div>}
             {f.amountWords && <div className="reference-words"><b>E.&amp;<br/>O.E</b><span>{amountWords(grandTotal)}</span></div>}
           </div>
           <div className="reference-totals">
-            {f.packing && <p><span>Packing &amp; forwarding</span><b>{packingTotal ? money(packingTotal) : ''}</b></p>}
+            {f.packing && <p><span>Packing &amp; Forwarding</span><b>{packingTotal ? money(packingTotal) : ''}</b></p>}
             {f.subtotal && <p className="emphasis"><span>TOTAL</span><b>{money(sum.base)}</b></p>}
             {f.taxes && !isNonGst && (interstate ? <p><span>Add: IGST</span><b>{money(sum.igst)}</b></p> : <><p><span>Add: CGST</span><b>{money(sum.cgst)}</b></p><p><span>Add: SGST</span><b>{money(sum.sgst)}</b></p></>)}
             {f.roundOff && Math.abs(grandTotal - sum.total) >= 0.005 && <p><span>Round off</span><b>{money(grandTotal - sum.total)}</b></p>}
@@ -174,7 +188,7 @@ function ReferenceInvoice({bill, template, state, supplier, isLive}: {bill: Bill
         {f.payments && bill.kind !== 'Quotation' && bill.status !== 'Draft' && !supplier && <div className="reference-payment"><span>Amount received: {money(bill.previewPaid ?? bill.paid ?? paid(state, bill.id))}</span><b>Balance: {money(bill.previewPaid !== undefined ? Math.max(0, grandTotal - bill.previewPaid) : bill.dueAmount ?? balance(state, bill))}</b></div>}
         <section className="reference-signatures">
           <div>{f.declaration && <><u>Terms of Conditions:</u><div className="reference-terms">{(template.terms || seller.declaration || '').split(/\r?\n/).filter(Boolean).map((term: string, index: number) => <p key={index}>{index + 1}. {term.replace(/^\d+[.)]\s*/, '')}</p>)}</div></>}</div>
-          <div className="signature-label">{f.receiverSignature && <>Receiver&apos;s Signature with seal</>}</div>
+          <div className="signature-label">{f.receiverSignature && bill.kind !== 'Quotation' && <>Receiver&apos;s Signature with seal</>}</div>
           <div className="signature-label">{f.signatures && <><b>For {seller.name}</b><span>Authorised Signature</span></>}</div>
         </section>
         {f.notes && bill.notes && <div className="reference-notes"><b>Notes:</b> {bill.notes}</div>}</>}
@@ -340,6 +354,7 @@ export default function Templates() {
   const [print, setPrint] = useState(false);
   const [saving, setSaving] = useState(false);
   const creatingNonGstTemplate = useRef(false);
+  const creatingQuotationTemplate = useRef(false);
 
   useEffect(() => {
     if (editing || creatingNonGstTemplate.current || state.templates.length === 0 || state.templates.some(isNonGstTemplate)) return;
@@ -348,6 +363,13 @@ export default function Templates() {
     void saveTemplateApi(buildNonGstTemplate(base)).finally(() => {
       creatingNonGstTemplate.current = false;
     });
+  }, [editing, saveTemplateApi, state.templates]);
+
+  useEffect(() => {
+    if (editing || creatingQuotationTemplate.current || state.templates.length === 0 || state.templates.some(isQuotationTemplate)) return;
+    const base = state.templates.find(template => template.status !== 'Archived' && !isNonGstTemplate(template)) || extensionSeed.templates[0];
+    creatingQuotationTemplate.current = true;
+    void saveTemplateApi(buildQuotationTemplate(base)).finally(() => { creatingQuotationTemplate.current = false; });
   }, [editing, saveTemplateApi, state.templates]);
 
   const previewOnlySample: Bill = {
@@ -441,8 +463,8 @@ export default function Templates() {
   return (
     <>
       <PageHead
-        title="Invoice templates"
-        description="Create reusable layouts, customise fields and choose a template whenever you print."
+        title="Document templates"
+        description="Create reusable invoice and quotation layouts, customise fields and choose a template whenever you print."
         actions={
           editing ? (
             <>
@@ -463,7 +485,7 @@ export default function Templates() {
           ) : (
             <Btn onClick={handleNewTemplate}>
               <Plus size={16} />
-              New template
+              New document template
             </Btn>
           )
         }
@@ -648,7 +670,7 @@ export default function Templates() {
           </div>
           <div className="template-live-preview">
             <div className="toolbar">
-              <strong>Invoice preview</strong>
+              <strong>{editing.title === 'QUOTATION' ? 'Quotation preview' : 'Invoice preview'}</strong>
               <select
                 aria-label="Preview document"
                 value={sampleId}
@@ -665,7 +687,7 @@ export default function Templates() {
             {state.bills.length === 0 && (
               <div className="template-preview-note">Preview only · no invoice or customer record will be saved</div>
             )}
-            <TemplateInvoice bill={{...sample, shopSnapshot: state.settings}} template={editing} />
+            <TemplateInvoice bill={{...sample, kind: editing.title === 'QUOTATION' ? 'Quotation' : sample.kind, due: editing.title === 'QUOTATION' ? nextDate(sample.date, 7) : sample.due, shopSnapshot: state.settings}} template={editing} />
           </div>
         </div>
       ) : state.templates.length === 0 ? (
@@ -696,7 +718,7 @@ export default function Templates() {
                 <span>
                   {t.paper} · {t.orientation} · {t.columns.filter((c) => c.show).length} columns
                 </span>
-                <Badge>{isNonGstTemplate(t) ? 'Non-GST' : 'GST / General'}</Badge>
+                <Badge>{isQuotationTemplate(t) ? 'Quotation' : isNonGstTemplate(t) ? 'Non-GST' : 'GST / General'}</Badge>
               </div>
               <div className="body-pad actions">
                 <Btn

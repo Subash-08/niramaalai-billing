@@ -17,6 +17,7 @@ export default function Settings(){
   const [saving, setSaving] = useState(false);
   const [gstSequenceMode, setGstSequenceMode] = useState<SequenceMode>('continue');
   const [nonGstSequenceMode, setNonGstSequenceMode] = useState<SequenceMode>('continue');
+  const [quotationSequenceMode, setQuotationSequenceMode] = useState<SequenceMode>('continue');
   const set = (key: string, value: unknown) => setForm(current => ({...current, [key]: value}));
 
   async function save(){
@@ -32,9 +33,10 @@ export default function Settings(){
   const nonGstPreview = invoicePreview(form.nonGstInvoicePrefix || 'NGST', form.nonGstInvoiceStartNumber || 1, padding, separator, includeYear);
   const sharedNumbering = form.invoiceNumberingMode === 'shared';
   const sequenceStatus = state.settings.invoiceNumberingStatus;
+  const quotationPreview = invoicePreview(form.quotationPrefix || 'QUO', sequenceStatus?.quotationNext || form.quotationStartNumber || 1, padding, separator, includeYear);
 
   return <>
-    <PageHead title="Company settings" description="These details appear throughout the workspace and on issued invoices. Until setup is complete, the application displays Billing Software." actions={<Link className="btn secondary" href="/templates">Invoice templates</Link>}/>
+    <PageHead title="Company settings" description="These details appear throughout the workspace and on issued invoices. Until setup is complete, the application displays Billing Software." actions={<Link className="btn secondary" href="/templates">Document templates</Link>}/>
 
     <Card title="Business identity">
       <div className="form-body form-grid">
@@ -75,6 +77,12 @@ export default function Settings(){
         <label className="check full"><input type="checkbox" checked={includeYear} onChange={e => set('invoiceIncludeFinancialYear', e.target.checked)}/> Include financial year in invoice numbers</label>
         {sequenceStatus && <div className="notice full"><strong>Current numbering status</strong><p>Financial year: {sequenceStatus.financialYear}. {sharedNumbering ? `Last issued number: ${sequenceStatus.gstLast || 'None'}. Next expected serial: ${sequenceStatus.gstNext}.` : `GST last: ${sequenceStatus.gstLast || 'None'}, next: ${sequenceStatus.gstNext}. Non-GST last: ${sequenceStatus.nonGstLast || 'None'}, next: ${sequenceStatus.nonGstNext}.`}</p></div>}
         <p className="hint full">{sharedNumbering ? <>Next-number preview: <b>{invoicePreview(form.invoicePrefix || 'INV', sequenceStatus?.gstNext || form.gstInvoiceStartNumber || 1, padding, separator, includeYear)}</b>. Both invoice types use one counter.</> : <>Next GST preview: <b>{invoicePreview(form.gstInvoicePrefix || 'INV', sequenceStatus?.gstNext || form.gstInvoiceStartNumber || 1, padding, separator, includeYear)}</b>. Next Non-GST preview: <b>{invoicePreview(form.nonGstInvoicePrefix || 'NGST', sequenceStatus?.nonGstNext || form.nonGstInvoiceStartNumber || 1, padding, separator, includeYear)}</b>. Continue keeps the counter; start from a new number only moves it forward.</>}</p>
+        <div className="full"><hr/><h3>Quotation numbering</h3><p className="muted">Quotations use their own sequence and never consume invoice numbers.</p></div>
+        <Field label="Quotation number field name"><input value={form.quotationNumberLabel || 'Quotation No'} onChange={e => set('quotationNumberLabel', e.target.value)} /></Field>
+        <Field label="Quotation prefix"><input value={form.quotationPrefix || 'QUO'} onChange={e => set('quotationPrefix', e.target.value.toUpperCase())} placeholder="QUO" /></Field>
+        <Field label="Quotation sequence"><select value={quotationSequenceMode} onChange={e => setQuotationSequenceMode(e.target.value as SequenceMode)}><option value="continue">Keep automatic next quotation number</option><option value="set-next">Move next quotation serial forward</option></select></Field>
+        <Field label="New next quotation serial"><input type="number" min="1" max="999999999" step="1" disabled={quotationSequenceMode === 'continue'} value={form.quotationStartNumber || 1} onChange={e => set('quotationStartNumber', Number(e.target.value))}/></Field>
+        <div className="notice full"><strong>Quotation sequence status</strong><p>Last used: {sequenceStatus?.quotationLast || 'None'}. Next expected serial: {sequenceStatus?.quotationNext || form.quotationStartNumber || 1}. Preview: <b>{quotationPreview}</b>.</p></div>
       </div>
     </Card>
 

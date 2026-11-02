@@ -57,7 +57,7 @@ import { RecordReceiptModal } from './payments';
 
 export { InvoicePaper };
 
-function QuickServiceForm({onClose, onSave}: {onClose: () => void; onSave: (service: any) => Promise<void>}) {
+function QuickServiceForm({ onClose, onSave }: { onClose: () => void; onSave: (service: any) => Promise<void> }) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     id: uid('SRV'), name: '', category: 'Digital printing', description: '', unit: 'Job',
@@ -70,13 +70,13 @@ function QuickServiceForm({onClose, onSave}: {onClose: () => void; onSave: (serv
       try { await onSave(form); } finally { setSaving(false); }
     }}>
       <div className="form-body form-grid">
-        <Field label="Service name *"><input required autoFocus value={form.name} onChange={event => setForm({...form, name: event.target.value})}/></Field>
-        <Field label="Category"><input required value={form.category} onChange={event => setForm({...form, category: event.target.value})}/></Field>
-        <Field label="Billing unit"><select value={form.unit} onChange={event => setForm({...form, unit: event.target.value})}>{['Piece','Sheet','Page','Set','Book','Box','Square foot','Roll','Pack','Job'].map(unit => <option key={unit}>{unit}</option>)}</select></Field>
-        <Field label="Standard rate (₹) *"><input required type="number" min="0" step="0.01" value={form.rate} onChange={event => setForm({...form, rate: Number(event.target.value)})}/></Field>
-        <Field label="GST rate %"><select value={form.tax} onChange={event => setForm({...form, tax: Number(event.target.value)})}>{[5,12,18,28].map(rate => <option key={rate} value={rate}>{rate}%</option>)}</select></Field>
-        <Field label="SAC"><input value={form.sac} onChange={event => setForm({...form, sac: event.target.value})}/></Field>
-        <div className="full"><Field label="Description / specifications *"><textarea required value={form.description} onChange={event => setForm({...form, description: event.target.value})}/></Field></div>
+        <Field label="Service name *"><input required autoFocus value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></Field>
+        <Field label="Category"><input required value={form.category} onChange={event => setForm({ ...form, category: event.target.value })} /></Field>
+        <Field label="Billing unit"><select value={form.unit} onChange={event => setForm({ ...form, unit: event.target.value })}>{['Piece', 'Sheet', 'Page', 'Set', 'Book', 'Box', 'Square foot', 'Roll', 'Pack', 'Job'].map(unit => <option key={unit}>{unit}</option>)}</select></Field>
+        <Field label="Standard rate (₹) *"><input required type="number" min="0" step="0.01" value={form.rate} onChange={event => setForm({ ...form, rate: Number(event.target.value) })} /></Field>
+        <Field label="GST rate %"><select value={form.tax} onChange={event => setForm({ ...form, tax: Number(event.target.value) })}>{[5, 12, 18, 28].map(rate => <option key={rate} value={rate}>{rate}%</option>)}</select></Field>
+        <Field label="SAC"><input value={form.sac} onChange={event => setForm({ ...form, sac: event.target.value })} /></Field>
+        <div className="full"><Field label="Description / specifications *"><textarea required value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></Field></div>
       </div>
       <div className="form-actions"><Btn secondary onClick={onClose}>Cancel</Btn><Btn type="submit" disabled={saving}>{saving ? 'Saving…' : 'Create service'}</Btn></div>
     </form>
@@ -191,7 +191,7 @@ export function DocumentComposer({
   });
 
   const [date, setDate] = useState(TODAY);
-  const [due, setDue] = useState(existing?.due || TODAY);
+  const [due, setDue] = useState(existing?.due || (quotation ? '' : TODAY));
   const [taxMode, setTaxMode] = useState<'Intra-state' | 'Inter-state'>(
     existing?.taxMode || source?.taxMode || 'Intra-state'
   );
@@ -228,16 +228,20 @@ export function DocumentComposer({
   const nonGstTemplate = state.templates.find((template) =>
     /non[\s-]?gst/i.test(`${template.title || ''} ${template.name || ''}`)
   );
-  const [templateId, setTemplateId] = useState(source?.templateId || (requestedNonGst ? nonGstTemplate?.id : '') || state.defaultTemplateId);
+  const quotationTemplate = state.templates.find((template) => /quotation|quote/i.test(`${template.title || ''} ${template.name || ''}`));
+  const availableTemplates = state.templates.filter(template => (!isLive || template.status === 'Active') && (quotation
+    ? /quotation|quote/i.test(`${template.title || ''} ${template.name || ''}`)
+    : !/quotation|quote/i.test(`${template.title || ''} ${template.name || ''}`)));
+  const [templateId, setTemplateId] = useState(source?.templateId || (quotation ? quotationTemplate?.id : '') || (requestedNonGst ? nonGstTemplate?.id : '') || state.defaultTemplateId);
   const [printJobId, setPrintJobId] = useState(params.get('printJob') || (existing as any)?.printJobId || (source as any)?.printJobId || (existing as any)?.jobId || (source as any)?.jobId || '');
   const templateChosenByUser = useRef(false);
   useEffect(() => {
     // Initial demo state may render before live bootstrap completes. Only an
     // implicit selection follows the live default; explicit choices never switch.
     if (!templateChosenByUser.current && !source?.templateId && !params.get('edit') && !params.get('from')) {
-      setTemplateId((requestedNonGst ? nonGstTemplate?.id : '') || state.defaultTemplateId || '');
+      setTemplateId((quotation ? quotationTemplate?.id : '') || (requestedNonGst ? nonGstTemplate?.id : '') || state.defaultTemplateId || '');
     }
-  }, [isLive, state.defaultTemplateId, source?.templateId, params, requestedNonGst, nonGstTemplate?.id]);
+  }, [isLive, state.defaultTemplateId, source?.templateId, params, quotation, quotationTemplate?.id, requestedNonGst, nonGstTemplate?.id]);
   const [shipSeparate, setShipSeparate] = useState(!!source?.shipTo);
   const [shipTo, setShipTo] = useState(
     source?.shipTo || { name: '', address: '', phone: '', state: 'Tamil Nadu', postalCode: '' }
@@ -279,14 +283,14 @@ export function DocumentComposer({
     ).padStart(4, '0')}`
   );
   const numbering = state.settings.invoiceNumberingStatus;
-  const expectedSerial = nonGst ? numbering?.nonGstNext : numbering?.gstNext;
-  const expectedPrefix = nonGst
+  const expectedSerial = quotation ? numbering?.quotationNext : nonGst ? numbering?.nonGstNext : numbering?.gstNext;
+  const expectedPrefix = quotation ? (state.settings.quotationPrefix || 'QUO') : nonGst
     ? (state.settings.nonGstInvoicePrefix || 'NGST')
     : (state.settings.gstInvoicePrefix || state.settings.invoicePrefix || 'INV');
   const expectedSeparator = state.settings.invoiceNumberSeparator ?? '-';
   const expectedNumber = expectedSerial
     ? [expectedPrefix, ...(state.settings.invoiceIncludeFinancialYear !== false && numbering?.financialYear !== 'ALL' ? [numbering?.financialYear] : []), String(expectedSerial).padStart(state.settings.invoiceNumberPadding ?? 4, '0')].join(expectedSeparator)
-    : 'Assigned safely when invoice is issued';
+    : `Assigned safely when ${quotation ? 'quotation is saved' : 'invoice is issued'}`;
 
   const person = purchase
     ? supplierChoices.find((c) => c.id === customerId) || state.suppliers.find((c) => c.id === customerId)
@@ -560,13 +564,9 @@ export function DocumentComposer({
           }
           if (j.customerId) setCustomerId(j.customerId);
           setPrintJobId(j._id || printJobId);
-          const specs: Record<string, string> = {};
-          if (j.specifications?.size) specs.size = j.specifications.size;
-          if (j.specifications?.material) specs.material = j.specifications.material;
-          if (j.specifications?.gsm) specs.gsm = j.specifications.gsm;
-          if (j.specifications?.colour) specs.colour = j.specifications.colour;
-          if (j.specifications?.sides) specs.sides = j.specifications.sides;
-          if (j.specifications?.finishing) specs.finishing = j.specifications.finishing;
+          const specs: Record<string, string> = Object.fromEntries(
+            Object.entries(j.specifications || {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && !!entry[1])
+          );
           if (j.dueDate) specs.deliveryDate = j.dueDate;
           if (j.notes) specs.notes = j.notes;
           setLines([
@@ -744,11 +744,11 @@ export function DocumentComposer({
   }
 
   function validateBasic(): boolean {
-    if (!purchase && (!billTo.name.trim() || !billTo.address.trim())) {
+    if (!purchase && !quotation && (!billTo.name.trim() || !billTo.address.trim())) {
       notify('Enter the bill-to name and address for this document.');
       return false;
     }
-    if (shipSeparate && (!shipTo.name.trim() || !shipTo.address.trim() || !shipTo.state.trim())) {
+    if (!quotation && shipSeparate && (!shipTo.name.trim() || !shipTo.address.trim() || !shipTo.state.trim())) {
       notify('Enter the ship-to name, address and state, or use the billing address.');
       return false;
     }
@@ -787,13 +787,13 @@ export function DocumentComposer({
       return false;
     }
     if (!nonGst) {
-      const invalidTaxIndex = lines.findIndex(line => ![5,12,18,28].includes(line.tax));
+      const invalidTaxIndex = lines.findIndex(line => ![5, 12, 18, 28].includes(line.tax));
       if (invalidTaxIndex >= 0) {
         notify(`Choose 5%, 12%, 18% or 28% GST for item ${invalidTaxIndex + 1}. Use the Non-GST invoice page for items without GST.`);
         return false;
       }
     }
-    if ((purchase || quotation) && due < date) {
+    if ((purchase || quotation) && due && due < date) {
       notify(quotation ? 'Valid-until date cannot be before the quotation date.' : 'Supplier due date cannot be before the purchase date.');
       return false;
     }
@@ -1041,6 +1041,13 @@ export function DocumentComposer({
         }
       }
 
+      const selectedIsQuotationTemplate = /quotation|quote/i.test(`${templateRecord.title || ''} ${templateRecord.name || ''}`);
+      if (quotation !== selectedIsQuotationTemplate) {
+        notify(quotation ? 'Select a quotation template. Invoice templates cannot be used for quotations.' : 'Select an invoice template. Quotation templates cannot be used for invoices.');
+        setBusy(false);
+        return;
+      }
+
       let chosenTemplateRev = templateRecord.currentRevision ?? templateRecord.revision;
       if (typeof chosenTemplateRev !== 'number' || chosenTemplateRev < 1) {
         try {
@@ -1129,7 +1136,7 @@ export function DocumentComposer({
           invoiceKind: (category === 'Service' ? 'Service' : 'Sale') as 'Sale' | 'Service',
           businessCategory: (category === 'Used goods' ? 'UsedGoods' : category === 'Service' ? 'Service' : 'NewGoods') as any,
           quotationDate: date,
-          validUntil: due >= date ? due : date,
+          validUntil: due || undefined,
           inclusive: nonGst ? false : !!inclusive,
           taxMode,
           placeOfSupply,
@@ -1391,7 +1398,7 @@ export function DocumentComposer({
                   const days = purchase
                     ? (c as any)?.terms
                     : Number((c as any)?.details?.paymentTerms || 0);
-                  setDue(nextDate(date, days || 0));
+                  if (!quotation) setDue(nextDate(date, days || 0));
                   if (!purchase && c) {
                     const nextBillTo = {
                       name: c.name || '',
@@ -1409,7 +1416,7 @@ export function DocumentComposer({
             </div>
 
             {!purchase && (
-              <Field label="Invoice layout / template">
+              <Field label={quotation ? 'Quotation layout / template' : 'Invoice layout / template'}>
                 <select
                   value={templateId}
                   onChange={(e) => {
@@ -1418,15 +1425,15 @@ export function DocumentComposer({
                   }}
                 >
                   <option value="">Select a saved template</option>
-                  {state.templates.filter(t => !isLive || t.status === 'Active').map((t) => (
+                  {availableTemplates.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
                     </option>
                   ))}
                 </select>
-                {isLive && state.templates.filter(t => t.status === 'Active').length === 0 ? (
+                {isLive && availableTemplates.length === 0 ? (
                   <div style={{ marginTop: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                    <span style={{ color: '#d97706', fontSize: '0.85rem' }}>No saved templates found.</span>
+                    <span style={{ color: '#d97706', fontSize: '0.85rem' }}>No saved {quotation ? 'quotation' : 'invoice'} templates found.</span>
                     <Link className="text-link" href="/templates" target="_blank" rel="noopener noreferrer">
                       Create template (opens new tab)
                     </Link>
@@ -1465,14 +1472,14 @@ export function DocumentComposer({
 
             <Field label="Document number">
               <input readOnly value={isEditMode ? id : expectedNumber} />
-              {!isEditMode && <span className="muted">The server assigns the next GST or Non-GST number at issue time, preventing duplicates.</span>}
+              {!isEditMode && <span className="muted">The server assigns the next {quotation ? 'quotation' : 'GST or Non-GST invoice'} number {quotation ? 'when saved' : 'at issue time'}, preventing duplicates.</span>}
             </Field>
 
             <Field label="Date">
               <input type="date" max={TODAY} value={date} onChange={(e) => setDate(e.target.value)} />
             </Field>
 
-            {quotation && <Field label="Valid until">
+            {quotation && <Field label="Valid until (optional)" hint="Leave blank when the quotation has no automatic expiry date.">
               <input type="date" min={date} value={due} onChange={(e) => setDue(e.target.value)} />
             </Field>}
 
@@ -1533,7 +1540,7 @@ export function DocumentComposer({
             )}
           </div>
 
-          {!purchase && (
+          {!purchase && !quotation && (
             <div className="form-body">
               <div className="form-grid">
                 <div className="full">
@@ -1605,7 +1612,7 @@ export function DocumentComposer({
         </Card>
 
         <Card
-          title="Invoice items"
+          title={quotation ? 'Quotation items' : 'Invoice items'}
           sub={
             nonGst
               ? 'Non-GST invoice. Entered rates are final and no GST is calculated or printed.'
@@ -1708,14 +1715,18 @@ export function DocumentComposer({
 
                         {l.lineType === 'Charge' && <Badge>{/shipping/i.test(l.name) ? 'Shipping charge' : 'Additional charge'}</Badge>}
                       </div>
-                      {l.lineType === 'Service' && (
+                      {(l.lineType === 'Service' || Object.values(l.printSpecifications || {}).some(Boolean)) && (
                         <details className="line-specifications">
                           <summary>Print specifications</summary>
                           <div className="line-spec-grid">
-                            {[
+                            {([
                               ['size', 'Size'], ['material', 'Paper / material'], ['gsm', 'GSM'], ['colour', 'Colour'],
                               ['sides', 'Printing sides'], ['finishing', 'Finishing'], ['deliveryDate', 'Delivery date'], ['notes', 'Specification notes'],
-                            ].map(([key, label]) => <input key={key} type={key === 'deliveryDate' ? 'date' : 'text'} aria-label={`${label} for item ${i + 1}`} placeholder={label} value={(l.printSpecifications as any)?.[key] || ''} onChange={(e) => updatePrintSpecification(i, key, e.target.value)} />)}
+                            ] as Array<[string,string]>).concat(
+                              Object.keys(l.printSpecifications || {})
+                                .filter(key => !['size','material','gsm','colour','sides','finishing','deliveryDate','notes'].includes(key))
+                                .map(key => [key, key.replace(/([A-Z])/g, ' $1').replace(/^./, letter => letter.toUpperCase())])
+                            ).map(([key, label]) => <input key={key} type={key === 'deliveryDate' ? 'date' : 'text'} aria-label={`${label} for item ${i + 1}`} placeholder={label} value={(l.printSpecifications as any)?.[key] || ''} onChange={(e) => updatePrintSpecification(i, key, e.target.value)} />)}
                           </div>
                         </details>
                       )}
@@ -2715,7 +2726,7 @@ export default function Documents({
     return matchSearch && matchDate && matchCat && matchTaxType && matchStatus;
   });
 
-  const path = '/sales';
+  const path = purchase ? '/purchases' : quotation ? '/quotations' : '/sales';
   const purchaseExportUrl = (format: string) => {
     const query = new URLSearchParams({ format });
     if (q.trim()) query.set('search', q.trim());
@@ -2868,7 +2879,7 @@ export default function Documents({
       {record && (
         <Link className="back-link" href={path}>
           <ArrowLeft size={14} />
-          All invoices
+          {quotation ? 'All quotations' : purchase ? 'All purchases' : 'All invoices'}
         </Link>
       )}
 
@@ -2909,7 +2920,7 @@ export default function Documents({
                   Delivery Challan
                 </Btn>
               )}
-              {record.status === 'Draft' && (
+              {!quotation && record.status === 'Draft' && (
                 <>
                   <Link className="btn secondary" href={`/sales/new?edit=${id}`}>
                     Edit draft
@@ -2933,7 +2944,7 @@ export default function Documents({
                   </Btn>
                 </>
               )}
-              {record.status !== 'Draft' && (
+              {!quotation && record.status !== 'Draft' && (
                 <>
                   {(detailData?.raw?.duePaise != null ? detailData.raw.duePaise > 0 : balance(state, record) > 0) && (
                     <Btn
@@ -2954,6 +2965,43 @@ export default function Documents({
                     </Btn>
                   )}
                 </>
+              )}
+              {quotation && record.status === 'Draft' && (
+                <Link className="btn secondary" href={`/quotations/new?edit=${id}`}>Edit quotation</Link>
+              )}
+              {quotation && record.status === 'Draft' && (
+                <Btn secondary disabled={quotationSharing} onClick={async () => {
+                  setQuotationSharing(true);
+                  const result = await shareQuotationApi(record.id, detailData?.raw?.version ?? 1, `quote-share-${record.id}-${Date.now()}`);
+                  setQuotationSharing(false);
+                  if (!result.success) return notify(result.error || 'Could not mark quotation as sent.');
+                  notify('Quotation marked as sent.');
+                  refreshDetail();
+                }}>{quotationSharing ? 'Updating…' : 'Mark as sent'}</Btn>
+              )}
+              {quotation && !detailData?.raw?.convertedToInvoiceId && ['Draft', 'Sent', 'Shared', 'Accepted'].includes(record.status) && (
+                <Btn onClick={async () => {
+                  const result = await convertQuotationApi(record.id, detailData?.raw?.version ?? 1, TODAY);
+                  if (!result.success || !result.draft) return notify(result.error || 'Could not convert quotation.');
+                  notify('Invoice draft created from quotation.');
+                  router.push(`/sales/${result.draft._id || result.draft.id}`);
+                }}>Convert to invoice</Btn>
+              )}
+              {quotation && !detailData?.raw?.convertedToInvoiceId && ['Draft', 'Sent', 'Shared'].includes(record.status) && (
+                <Btn secondary onClick={() => setCancel(true)}>Cancel quotation</Btn>
+              )}
+              {quotation && ['Cancelled', 'Expired'].includes(record.status) && (
+                <Btn onClick={async () => {
+                  const validUntil = window.prompt('Enter the new valid-until date (YYYY-MM-DD)', nextDate(TODAY, 7));
+                  if (!validUntil) return;
+                  const result = await reopenQuotationApi(record.id, detailData?.raw?.version ?? 1, validUntil);
+                  if (!result.success) return notify(result.error || 'Could not reopen quotation.');
+                  notify('Quotation reopened as a draft.');
+                  refreshDetail();
+                }}>Reopen quotation</Btn>
+              )}
+              {quotation && detailData?.raw?.convertedToInvoiceId && (
+                <Link className="btn" href={`/sales/${detailData.raw.convertedToInvoiceId}`}>Open invoice</Link>
               )}
             </>
           ) : (
@@ -3013,14 +3061,9 @@ export default function Documents({
                   </span>
                 </div>
               )}
-              {!quotation && !purchase && (
-                <Link className="btn secondary" href="/sales/new?kind=Service">
-                  Service invoice
-                </Link>
-              )}
               <Link href={path + '/new'} className="btn">
                 <Plus size={16} />
-                New invoice
+                {quotation ? 'New quotation' : 'New invoice'}
               </Link>
             </>
           )
@@ -3568,7 +3611,7 @@ export default function Documents({
             <InvoicePaper bill={record as Bill} />
           )}
 
-          <div className="detail-grid spaced screen-only">
+          {!quotation && <div className="detail-grid spaced screen-only">
             <Card title="Payment history">
               <div className="table-wrap">
                 <table>
@@ -3619,16 +3662,28 @@ export default function Documents({
                 </Link>
               </div>
             </Card>
-          </div>
+          </div>}
+          {quotation && <div className="detail-grid spaced screen-only">
+            <Card title="Quotation details">
+              <div className="body-pad stack">
+                <p><b>Quotation date:</b> {dateLabel(record.date)}</p>
+                <p><b>Valid until:</b> {dateLabel(record.due)}</p>
+                <p><b>Status:</b> <Badge>{record.status}</Badge></p>
+                <p className="muted">A quotation is a price offer. It does not create customer outstanding or accept payments until it is converted and the invoice is issued.</p>
+              </div>
+            </Card>
+            <Card title="Customer">
+              <div className="body-pad stack"><Link className="text-link" href={`/customers/${customer?.id || record.customerId}`}>Open customer profile <ArrowUpRight size={15} /></Link></div>
+            </Card>
+          </div>}
         </>
       ) : (
         <>
-          {!quotation && !purchase && (
-            <div className="tabs" aria-label="Invoice views" style={{ marginBottom: '1rem' }}>
-              <button type="button" className={status !== 'Unpaid' ? 'active' : ''} onClick={() => setStatus('All')}>All invoices</button>
-              <button type="button" className={status === 'Unpaid' ? 'active' : ''} onClick={() => setStatus('Unpaid')}>Outstanding</button>
-            </div>
-          )}
+          {!purchase && <div className="tabs" aria-label="Sales document views" style={{ marginBottom: '1rem' }}>
+            <Link className={!quotation && status !== 'Unpaid' ? 'active' : ''} href="/sales">Invoices</Link>
+            {!quotation && <button type="button" className={status === 'Unpaid' ? 'active' : ''} onClick={() => setStatus('Unpaid')}>Outstanding</button>}
+            <Link className={quotation ? 'active' : ''} href="/quotations">Quotations</Link>
+          </div>}
           <Card>
             {!quotation && !purchase && status === 'Unpaid' && (
               <div className="body-pad notice" style={{ margin: 12 }}><strong>Outstanding invoices</strong> — only issued invoices with a balance due are shown.</div>
@@ -3935,11 +3990,16 @@ export default function Documents({
             </Btn>
             <Btn
               danger
-              onClick={() => {
-                setState((s) => ({
-                  ...s,
-                  bills: s.bills.map((b) => (b.id === id ? { ...b, status: 'Cancelled' } : b)),
-                }));
+              onClick={async () => {
+                if (isLive) {
+                  const reason = window.prompt('Reason for cancelling this quotation', 'Customer did not proceed');
+                  if (!reason) return;
+                  const result = await cancelQuotationApi(record.id, detailData?.raw?.version ?? 1, reason);
+                  if (!result.success) return notify(result.error || 'Could not cancel quotation.');
+                  refreshDetail();
+                } else {
+                  setState((s) => ({...s, bills: s.bills.map((b) => (b.id === id ? {...b, status: 'Cancelled'} : b))}));
+                }
                 setCancel(false);
                 notify('Quotation cancelled.');
               }}

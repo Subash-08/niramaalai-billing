@@ -446,7 +446,7 @@ export function mapQuotationFromApi(doc: any) {
     quotationNumber: doc.quotationNumber || '',
     customerId: doc.customerId || '',
     date: doc.quotationDate || '',
-    due: doc.validUntil || doc.quotationDate || '',
+    due: doc.validUntil || '',
     validUntil: doc.validUntil,
     kind: 'Quotation' as const,
     category: (doc.businessCategory === 'NewGoods' ? 'New goods' : doc.businessCategory === 'UsedGoods' ? 'Used goods' : 'Service') as any,

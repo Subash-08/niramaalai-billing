@@ -40,9 +40,10 @@ const groups = [
     items: [
       ['/customers', 'Customers', Users],
       ['/sales', 'Sales & invoices', ShoppingCart],
+      ['/quotations', 'Quotations', FileText],
       ['/payments', 'Payments & receipts', Wallet],
       ['/dues', 'Customer dues', CalendarClock],
-      ['/templates', 'Invoice templates', FileText],
+      ['/templates', 'Document templates', FileText],
       ['/print-jobs', 'Print jobs', CalendarClock],
     ],
   },

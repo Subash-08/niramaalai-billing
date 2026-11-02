@@ -1405,6 +1405,11 @@ export async function listCustomerReceipts(
 
   const filter: Record<string, any> = {tenantId};
   if (query.customerId) filter.customerId = query.customerId;
+  if (query.method) filter['components.method'] = query.method;
+  if (query.minAmountPaise != null || query.maxAmountPaise != null) filter.totalAmountPaise = {
+    ...(query.minAmountPaise != null && {$gte: query.minAmountPaise}),
+    ...(query.maxAmountPaise != null && {$lte: query.maxAmountPaise}),
+  };
   if (query.dateFrom || query.dateTo) {
     filter.date = {
       ...(query.dateFrom && {$gte: query.dateFrom}),

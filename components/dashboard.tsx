@@ -11,7 +11,7 @@ import { Badge, Btn, Card, PageHead } from './ui';
 import { balance, money, roundedTotal, TODAY, totals } from '@/lib/domain';
 
 type DashboardData = {
-  sales: { todayTotalPaise: number; todayCount: number; monthTotalPaise: number; monthGstPaise: number; monthCount: number; monthGstSalesPaise: number; monthNonGstSalesPaise: number; monthGstInvoiceCount: number; monthNonGstInvoiceCount: number };
+  sales: { todayTotalPaise: number; todayCount: number; monthTotalPaise: number; monthGstPaise: number; monthCount: number; monthGstSalesPaise: number; monthGstInvoiceCount: number };
   dues: { totalCustomerOutstandingPaise: number };
   payments: { moneyReceivedTodayPaise: number; receivedTodayCount: number; moneyPaidTodayPaise: number; paidTodayCount: number };
   customerCount: number;
@@ -83,8 +83,7 @@ export default function Dashboard() {
     const invoices = state.bills.filter((bill: any) => bill.kind !== 'Quotation' && bill.status === 'Issued');
     const todayInvoices = invoices.filter((bill: any) => bill.date === TODAY);
     const monthInvoices = invoices.filter((bill: any) => bill.date?.slice(0, 7) === TODAY.slice(0, 7));
-    const monthNonGstInvoices = monthInvoices.filter((bill: any) => bill.lines.length > 0 && bill.lines.every((line: any) => line.taxTreatment === 'NonGST'));
-    const monthGstInvoices = monthInvoices.filter((bill: any) => !monthNonGstInvoices.includes(bill));
+    const monthGstInvoices = monthInvoices.filter((bill: any) => !(bill.lines.length > 0 && bill.lines.every((line: any) => line.taxTreatment === 'NonGST')));
     const receipts = state.payments.filter((payment: any) => payment.direction === 'In' && payment.date === TODAY);
     const vouchers = state.payments.filter((payment: any) => payment.direction === 'Out' && payment.date === TODAY);
 
@@ -96,9 +95,7 @@ export default function Dashboard() {
         monthGstPaise: Math.round(monthInvoices.reduce((sum, bill) => sum + totals(bill).tax, 0) * 100),
         monthCount: monthInvoices.length,
         monthGstSalesPaise: Math.round(monthGstInvoices.reduce((sum, bill) => sum + roundedTotal(bill), 0) * 100),
-        monthNonGstSalesPaise: Math.round(monthNonGstInvoices.reduce((sum, bill) => sum + roundedTotal(bill), 0) * 100),
         monthGstInvoiceCount: monthGstInvoices.length,
-        monthNonGstInvoiceCount: monthNonGstInvoices.length,
       },
       dues: { totalCustomerOutstandingPaise: Math.round(invoices.reduce((sum, bill) => sum + balance(state, bill), 0) * 100) },
       payments: {
@@ -153,7 +150,6 @@ export default function Dashboard() {
       description="Sales, GST, customer dues, receipts and payment vouchers from your billing records."
       actions={<div className="dashboard-actions">
         <Link className="btn" href="/sales/new"><Plus size={16} />New invoice</Link>
-        <Link className="btn secondary" href="/sales/new?taxType=non-gst"><Plus size={16} />Non-GST invoice</Link>
         <Link className="btn secondary" href="/payments"><ArrowDownLeft size={16} />Receive money</Link>
         <Link className="btn secondary" href="/payments"><ArrowUpRight size={16} />Pay money</Link>
       </div>}
@@ -174,7 +170,6 @@ export default function Dashboard() {
         <MetricCard label="Today’s sales" value={money(data.sales.todayTotalPaise / 100)} hint={`${data.sales.todayCount} invoice${data.sales.todayCount === 1 ? '' : 's'} issued`} icon={<IndianRupee size={21} />} tone="violet" />
         <MetricCard label="This month’s sales" value={money(data.sales.monthTotalPaise / 100)} hint={`${data.sales.monthCount} invoice${data.sales.monthCount === 1 ? '' : 's'} this month`} icon={<TrendingUp size={21} />} tone="green" />
         <MetricCard label="GST invoice sales" value={money(data.sales.monthGstSalesPaise / 100)} hint={`${data.sales.monthGstInvoiceCount} GST invoice${data.sales.monthGstInvoiceCount === 1 ? '' : 's'} this month`} icon={<FileText size={21} />} tone="blue" />
-        <MetricCard label="Non-GST sales" value={money(data.sales.monthNonGstSalesPaise / 100)} hint={`${data.sales.monthNonGstInvoiceCount} Non-GST invoice${data.sales.monthNonGstInvoiceCount === 1 ? '' : 's'} this month`} icon={<Receipt size={21} />} tone="violet" />
         <MetricCard label="This month’s GST" value={money(data.sales.monthGstPaise / 100)} hint="CGST, SGST and IGST" icon={<FileText size={21} />} tone="amber" />
         <MetricCard label="Customer outstanding" value={money(data.dues.totalCustomerOutstandingPaise / 100)} hint="Uncollected invoice balances" icon={<Users size={21} />} tone="red" />
 
