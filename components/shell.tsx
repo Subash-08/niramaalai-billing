@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
-import {usePathname, useRouter} from 'next/navigation';
-import {useEffect, useRef, useState, ReactNode} from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useRef, useState, ReactNode } from 'react';
 import {
   Monitor,
   LayoutDashboard,
@@ -27,8 +27,8 @@ import {
   Building2,
   UserRound,
 } from 'lucide-react';
-import {useStore} from './store';
-import {money} from '@/lib/domain';
+import { useStore } from './store';
+import { money } from '@/lib/domain';
 
 const groups = [
   {
@@ -41,6 +41,7 @@ const groups = [
       ['/customers', 'Customers', Users],
       ['/sales', 'Sales & invoices', ShoppingCart],
       ['/payments', 'Payments & receipts', Wallet],
+      ['/dues', 'Customer dues', CalendarClock],
       ['/templates', 'Invoice templates', FileText],
       ['/print-jobs', 'Print jobs', CalendarClock],
     ],
@@ -77,20 +78,23 @@ function currentModuleMode(path: string): ModuleMode {
   return moduleMode(root);
 }
 
-export default function Shell({children}: {children: ReactNode}) {
+export default function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const router = useRouter();
-  const {state, isLive, isLoading, companySession, refreshMasterData, notify} = useStore();
+  const { state, isLive, isLoading, companySession, refreshMasterData, notify } = useStore();
   const [mobile, setMobile] = useState(false);
   const [query, setQuery] = useState('');
   const [notifications, setNotifications] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [dueReminders, setDueReminders] = useState<any[]>([]);
   const accountRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function closeMenus(event: MouseEvent) {
       if (accountRef.current && !accountRef.current.contains(event.target as Node)) setAccountOpen(false);
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) setNotifications(false);
     }
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -106,6 +110,30 @@ export default function Shell({children}: {children: ReactNode}) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isLive) { setDueReminders([]); return; }
+    let active = true;
+    const load = () => fetch('/api/sales/invoices?status=Unpaid&hasDue=true&limit=20')
+      .then(response => response.ok ? response.json() : Promise.reject())
+      .then(data => {
+        if (!active) return;
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+        const cutoffDate = new Date(`${today}T00:00:00+05:30`);
+        cutoffDate.setDate(cutoffDate.getDate() + 7);
+        const cutoff = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(cutoffDate);
+        setDueReminders((data.items || []).filter((row: any) => {
+          const dueDate = row.promisedPaymentDate || row.dueDate;
+          return dueDate && dueDate <= cutoff && !row.dueReminderDismissed;
+        }));
+      })
+      .catch(() => { if (active) setDueReminders([]); });
+    void load();
+    const refresh = () => void load();
+    window.addEventListener('billing-data-changed', refresh);
+    const timer = window.setInterval(refresh, 60_000);
+    return () => { active = false; window.removeEventListener('billing-data-changed', refresh); window.clearInterval(timer); };
+  }, [isLive, path]);
+
   const userName = isLive ? companySession?.user?.name || 'Company user' : 'Guest';
   const userEmail = isLive ? companySession?.user?.email || '' : '';
   const companyName = isLive ? companySession?.company?.name || state.settings.name || 'Company' : 'Billing Software';
@@ -115,7 +143,7 @@ export default function Shell({children}: {children: ReactNode}) {
     if (signingOut) return;
     setSigningOut(true);
     try {
-      const response = await fetch('/api/auth/logout', {method: 'POST'});
+      const response = await fetch('/api/auth/logout', { method: 'POST' });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));
         throw new Error(result.error || 'Sign out failed.');
@@ -155,9 +183,9 @@ export default function Shell({children}: {children: ReactNode}) {
           <div className="brand-icon">
             <Monitor size={24} />
           </div>
-          <div>
+          <div className="brand-copy">
             <strong>{isLive && state.settings.name ? state.settings.name : 'Billing Software'}</strong>
-            <small>PRINT BUSINESS MANAGER</small>
+            {/* <small>PRINT BUSINESS MANAGER</small> */}
           </div>
         </Link>
         <button className="mobile-close icon-btn" onClick={() => setMobile(false)} aria-label="Close navigation">
@@ -177,7 +205,7 @@ export default function Shell({children}: {children: ReactNode}) {
                     key={url as string}
                   >
                     <I size={18} />
-                     <span>{label as string}</span>
+                    <span>{label as string}</span>
                   </Link>
                 );
               })}
@@ -280,27 +308,31 @@ export default function Shell({children}: {children: ReactNode}) {
           ) : (
             <span className="demo-pill">Sign in required</span>
           )}
-          <div className="notification-wrap">
+          <div className="notification-wrap" ref={notificationRef}>
             <button
               className="icon-btn notification-button"
               aria-label="Notifications"
               onClick={() => setNotifications(!notifications)}
             >
               <Bell size={20} />
-              <i />
+              {dueReminders.length > 0 && <i />}
             </button>
             {notifications && (
               <div className="notification-panel">
                 <strong>Needs your attention</strong>
-                <Link href="/payments" onClick={() => setNotifications(false)}>
-                  Review payments and outstanding receipts
-                </Link>
-                <Link href="/print-jobs" onClick={() => setNotifications(false)}>
-                  Review print jobs and delivery dates
-                </Link>
-                <Link href="/sales" onClick={() => setNotifications(false)}>
-                  Review unpaid customer invoices
-                </Link>
+                {dueReminders.slice(0, 5).map((row: any) => <div className="notification-row" key={row._id || row.id}>
+                  <Link href={`/sales/${row._id || row.id}`} onClick={() => setNotifications(false)}>
+                    {(row.invoiceNumber || row._id || row.id)} · due {row.promisedPaymentDate || row.dueDate}
+                  </Link>
+                  <button type="button" className="link-button" onClick={async () => {
+                    const invoiceId = row._id || row.id;
+                    const response = await fetch(`/api/sales/invoices/${encodeURIComponent(invoiceId)}/reminder`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dismissed: true }) });
+                    if (response.ok) setDueReminders(current => current.filter(item => (item._id || item.id) !== invoiceId));
+                    else notify('Could not clear reminder.');
+                  }}>Clear</button>
+                </div>)}
+                {!dueReminders.length && <span className="notification-empty">No payments are overdue or due within seven days.</span>}
+                <Link href="/dues" onClick={() => setNotifications(false)}>Open customer dues</Link>
               </div>
             )}
           </div>
@@ -360,14 +392,14 @@ export default function Shell({children}: {children: ReactNode}) {
 
         <main className={pageMode === 'preview' ? 'preview-live-view' : pageMode === 'mixed' ? 'mixed-live-view' : ''}>
           {!isLive && !isLoading && (
-            <div className="module-migration-notice preview" role="status" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem'}}>
+            <div className="module-migration-notice preview" role="status" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
               <div>
                 <strong>Company sign-in required:</strong> Sign in to access live tenant-isolated billing records.
               </div>
               <button
                 type="button"
                 className="btn"
-                style={{padding: '0.35rem 0.85rem', fontSize: '0.82rem', whiteSpace: 'nowrap'}}
+                style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
                 onClick={() => router.push('/account')}
               >
                 Sign in / register

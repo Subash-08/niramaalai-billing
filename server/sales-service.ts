@@ -33,6 +33,7 @@ import {
 } from './sales-schema';
 import {z} from 'zod';
 import {normalizeSerial} from './master-schema';
+import {invoiceTaxTypeQuery, nonGstInvoiceExpression} from './invoice-classification';
 import {canonicalSerialKey, resolveSerialUnit, transitionSerialUnit} from './serial-identity';
 import {assertSalePostingDay, settleInvoiceOnIssue, addWarrantyMonths} from './sales-posting';
 import {consumeStockReservation} from './stock-reservations';
@@ -868,11 +869,7 @@ export function buildSalesFilter(identity: Identity, raw: unknown, kind: 'invoic
   } else if (params.status) filter.status = params.status;
   if (params.customerId) filter.customerId = params.customerId;
   if (params.businessCategory) filter.businessCategory = params.businessCategory;
-  if (params.taxType === 'NonGST') {
-    filter.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
-  } else if (params.taxType === 'GST') {
-    filter.lines = {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}};
-  }
+  Object.assign(filter, invoiceTaxTypeQuery(params.taxType));
   if (params.dateFrom || params.dateTo) filter[kind === 'invoices' ? 'invoiceDate' : 'quotationDate'] = {
     ...(params.dateFrom && {$gte: params.dateFrom}), ...(params.dateTo && {$lte: params.dateTo})};
   if (params.hasDue === 'true') {
@@ -880,7 +877,7 @@ export function buildSalesFilter(identity: Identity, raw: unknown, kind: 'invoic
     filter.status = 'Issued'; filter.duePaise = {$gt: 0};
   }
   if (params.search) {
-    const escaped = params.search.replace(/[.*+?^${}()|[]\]/g, '\$&');
+    const escaped = params.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     filter.$or = [{[kind === 'invoices' ? 'invoiceNumber' : 'quotationNumber']: {$regex: escaped, $options: 'i'}},
       {'customerSnapshot.name': {$regex: escaped, $options: 'i'}}];
   }
@@ -930,16 +927,6 @@ export async function getSalesSummary(
     matchInvoices.customerId = params.customerId;
     matchQuotations.customerId = params.customerId;
   }
-  const nonGstInvoiceExpression = {
-    $and: [
-      {$gt: [{$size: {$ifNull: ['$lines', []]}}, 0]},
-      {$eq: [
-        {$size: {$filter: {input: {$ifNull: ['$lines', []]}, as: 'line', cond: {$eq: ['$$line.taxTreatment', 'NonGST']}}}},
-        {$size: {$ifNull: ['$lines', []]}},
-      ]},
-    ],
-  };
-
   const [invoicesFacet, quotationsFacet, advancesRes] = await Promise.all([
     col<InvoiceDocument>(db, 'invoices').aggregate([
       {$match: matchInvoices},

@@ -3,6 +3,7 @@ import {database, AppError} from '@/server/db';
 import {col} from '@/server/purchase-service';
 import {todayInKolkata} from '@/server/purchase-schema';
 import {isValidCalendarDate} from '@/server/master-schema';
+import {invoiceTaxTypeQuery, isNonGstInvoiceLines} from '@/server/invoice-classification';
 
 export const runtime = 'nodejs';
 
@@ -30,8 +31,11 @@ export async function GET(request: Request) {
       throw new AppError(404, `Report "${reportType}" is not available in this application.`);
     }
 
-    const from = url.searchParams.get('from') || todayInKolkata().slice(0, 8) + '01';
-    const to = url.searchParams.get('to') || todayInKolkata();
+    const today = todayInKolkata();
+    const currentYear = Number(today.slice(0, 4));
+    const financialYearFrom = `${Number(today.slice(5, 7)) >= 4 ? currentYear : currentYear - 1}-04-01`;
+    const from = url.searchParams.get('from') || financialYearFrom;
+    const to = url.searchParams.get('to') || today;
     if (!isValidCalendarDate(from) || !isValidCalendarDate(to) || from > to) {
       throw new AppError(400, 'Choose a valid date range.');
     }
@@ -58,12 +62,12 @@ export async function GET(request: Request) {
         if (paymentStatus === 'Paid') query.duePaise = 0;
         if (paymentStatus === 'Unpaid / partial') query.duePaise = {$gt: 0};
         if (reportType === 'GST sales') {
-          query.lines = {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}};
+          Object.assign(query, invoiceTaxTypeQuery('GST'));
         } else if (reportType === 'Non-GST sales') {
-          query.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
+          Object.assign(query, invoiceTaxTypeQuery('NonGST'));
         } else if (category && category !== 'All categories') {
-          if (category === 'Tax invoices') query['lines.taxBasisPoints'] = {$gt: 0};
-          else if (category === 'Non-GST invoices') query.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
+          if (category === 'Tax invoices') Object.assign(query, invoiceTaxTypeQuery('GST'));
+          else if (category === 'Non-GST invoices') Object.assign(query, invoiceTaxTypeQuery('NonGST'));
           else if (category === 'New goods') query.businessCategory = 'NewGoods';
           else if (category === 'Used goods') query.businessCategory = 'UsedGoods';
           else if (category === 'Service') query.businessCategory = 'Service';
@@ -118,7 +122,7 @@ export async function GET(request: Request) {
         };
         for (const invoice of invoices) {
           const lines = invoice.lines || [];
-          const type: keyof typeof summary = lines.length > 0 && lines.every((line: any) => line.taxTreatment === 'NonGST') ? 'Non-GST' : 'GST';
+          const type: keyof typeof summary = isNonGstInvoiceLines(lines) ? 'Non-GST' : 'GST';
           const target = summary[type];
           target.count += 1;
           target.taxablePaise += lines.reduce((sum: number, line: any) => sum + (line.taxableBasePaise || 0), 0);
@@ -149,6 +153,7 @@ export async function GET(request: Request) {
           tenantId,
           status: 'Issued',
           invoiceDate: {$gte: from, $lte: to},
+          ...invoiceTaxTypeQuery('GST'),
         };
         if (customerId && customerId !== 'All customers') query.customerId = customerId;
 
@@ -231,7 +236,14 @@ export async function GET(request: Request) {
         const invoiceNumberById = new Map(legacyInvoices.map((invoice: any) => [invoice._id, invoice.invoiceNumber || invoice._id]));
 
         const rows = receipts.map((r: any) => {
-          const comp = r.components?.[0] || {};
+          const components = r.components?.length
+            ? r.components
+            : [{account: r.account || 'Cash', method: r.method || 'Cash', reference: r.reference || ''}];
+          const accounts = [...new Set(components.map((component: any) => component.account || 'Cash'))].join(' + ');
+          const methods = [...new Set(components.map((component: any) => component.method || 'Cash'))]
+            .map(method => method === 'UPI' ? 'GPay / UPI' : method === 'BankTransfer' ? 'Bank transfer' : method)
+            .join(' + ');
+          const references = [...new Set(components.map((component: any) => component.reference).filter(Boolean))].join(', ') || '-';
           const targetId = r.invoiceId || r.allocations?.[0]?.targetId;
           const settledInvoice = r.receiptSnapshot?.invoiceNumber || invoiceNumberById.get(targetId) || targetId || 'Invoice';
           return [
@@ -239,9 +251,9 @@ export async function GET(request: Request) {
             r.date,
             r.customerSnapshot?.name || r.customerName || 'Customer',
             settledInvoice,
-            comp.account || 'Cash',
-            comp.method || r.method || 'Cash',
-            comp.reference || r.reference || '-',
+            accounts,
+            methods,
+            references,
             (r.totalAmountPaise || r.amountPaise || 0) / 100,
           ];
         });

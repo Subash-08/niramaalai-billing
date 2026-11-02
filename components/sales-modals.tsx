@@ -25,20 +25,24 @@ export function IssueInvoiceModal({
   const [recordExcess, setRecordExcess] = useState(false);
   const [creditLimitOverride, setCreditLimitOverride] = useState(false);
   const [creditLimitReason, setCreditLimitReason] = useState('');
+  const [nextDueDate, setNextDueDate] = useState('');
   const [paymentRows, setPaymentRows] = useState<
     Array<{account: 'Cash' | 'Bank'; method: 'Cash' | 'UPI' | 'BankTransfer' | 'Card'; amount: string; reference: string}>
-  >(() => initialPayments.map(p => ({
-    account: p.method === 'Cash' ? 'Cash' : 'Bank',
-    method: (p.method === 'Cash' ? 'Cash' : p.method === 'Card' ? 'Card' : p.method === 'UPI' || p.method === 'GPay' ? 'UPI' : 'BankTransfer'),
-    amount: p.amount, reference: '',
-  })));
+  >(() => {
+    const rows = initialPayments.map(p => ({
+      account: (p.method === 'Cash' ? 'Cash' : 'Bank') as 'Cash' | 'Bank',
+      method: (p.method === 'Cash' ? 'Cash' : p.method === 'Card' ? 'Card' : p.method === 'UPI' || p.method === 'GPay' ? 'UPI' : 'BankTransfer') as 'Cash' | 'UPI' | 'BankTransfer' | 'Card',
+      amount: p.amount, reference: '',
+    }));
+    return rows.length ? rows : [{account: 'Cash', method: 'Cash', amount: '', reference: ''}];
+  });
   const issueAttempt = useRef<{fingerprint: string; key: string} | null>(null);
 
   if (!isOpen) return null;
 
   const totalPaise = draft.totalPaise || 0;
   const totalRupees = totalPaise / 100;
-  const paymentTotal = paymentRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+  const paymentTotal = paymentRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
   const advanceTotal = applyAdvance || 0;
   const effectivePaid = paymentTotal + advanceTotal;
   const remainingDue = Math.max(0, totalRupees - effectivePaid);
@@ -72,7 +76,24 @@ export function IssueInvoiceModal({
   const handleIssue = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
-    for (const r of paymentRows) {
+    const paymentPaise = Math.round(paymentTotal * 100);
+    const activePaymentRows = paymentRows.filter(row => row.amount.trim());
+    for (const row of activePaymentRows) {
+      const rowPaise = Math.round((parseFloat(row.amount) || 0) * 100);
+      if (!/^\d+(?:\.\d{1,2})?$/.test(row.amount.trim()) || rowPaise < 1) {
+        notify('Each payment line must contain a positive amount with up to two decimal places.');
+        return;
+      }
+    }
+    if (paymentPaise > totalPaise) {
+      notify('Initial payment cannot exceed the invoice total.');
+      return;
+    }
+    if (paymentPaise > 0 && paymentPaise < totalPaise && nextDueDate && nextDueDate < TODAY) {
+      notify('The next due date cannot be before today.');
+      return;
+    }
+    for (const r of activePaymentRows) {
       const amt = parseFloat(r.amount) || 0;
       if (!/^\d+(?:\.\d{1,2})?$/.test(r.amount.trim()) || !Number.isFinite(amt) || Math.round(amt * 100) < 1) {
         notify('Enter a positive payment amount with up to two decimals, or remove the unused row for a credit invoice.');
@@ -95,14 +116,12 @@ export function IssueInvoiceModal({
       return;
     }
 
-    const components = paymentRows
-      .filter((r) => (parseFloat(r.amount) || 0) > 0)
-      .map((r) => ({
-        account: r.account,
-        method: r.method,
-        amountPaise: Math.round((parseFloat(r.amount) || 0) * 100),
-        reference: r.reference.trim(),
-      }));
+    const components: Array<{account: 'Cash'|'Bank'; method: 'Cash'|'UPI'|'BankTransfer'|'Card'; amountPaise: number; reference: string}> = activePaymentRows.map(row => ({
+      account: row.method === 'Cash' ? 'Cash' : 'Bank',
+      method: row.method,
+      amountPaise: Math.round((parseFloat(row.amount) || 0) * 100),
+      reference: row.reference.trim(),
+    }));
 
     const fingerprint = JSON.stringify({draft, components, advanceTotal, recordExcess, creditLimitOverride, creditLimitReason});
     if (!issueAttempt.current || issueAttempt.current.fingerprint !== fingerprint) {
@@ -114,14 +133,24 @@ export function IssueInvoiceModal({
         draftId: draft.id,
         expectedVersion: draft.version,
         paymentComponents: components,
-        applyCustomerAdvancePaise: Math.round(advanceTotal * 100),
-        recordExcessAsCustomerAdvance: recordExcess,
+        applyCustomerAdvancePaise: 0,
+        recordExcessAsCustomerAdvance: false,
         creditLimitOverride,
         creditLimitOverrideReason: creditLimitReason.trim(),
         idempotencyKey: issueAttempt.current.key,
       });
 
       if (res.success) {
+        if (paymentPaise > 0 && paymentPaise < totalPaise && nextDueDate) {
+          const invoiceId = res.invoice?._id || res.invoice?.id || res.invoice?.invoiceId || draft.id;
+          const dueResponse = await fetch(`/api/sales/invoices/${encodeURIComponent(invoiceId)}/due-date`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({promisedPaymentDate: nextDueDate, notes: 'Set while issuing invoice after initial payment.'}),
+          });
+          if (!dueResponse.ok) notify('Invoice and payment were recorded, but the next due date could not be saved. Set it from Customer dues.');
+        }
+        window.dispatchEvent(new Event('billing-data-changed'));
         notify('Invoice issued successfully.');
         onClose();
         onIssued?.(res.invoice);
@@ -139,7 +168,7 @@ export function IssueInvoiceModal({
   };
 
   return (
-    <Modal title={`Issue Sales Invoice · ${draft.id}`} onClose={onClose} wide>
+    <Modal title="Issue invoice" onClose={onClose}>
       <form onSubmit={handleIssue}>
         <div className="form-body stack">
           <div
@@ -158,14 +187,43 @@ export function IssueInvoiceModal({
               <h2 style={{margin: '0.25rem 0 0 0', color: 'var(--primary, #1a73e8)'}}>{money(totalRupees)}</h2>
             </div>
             <div style={{textAlign: 'right'}}>
-              <span style={{fontSize: '0.85rem', color: 'var(--muted, #666)'}}>Balance After Payment</span>
+              <span style={{fontSize: '0.85rem', color: 'var(--muted, #666)'}}>Amount due after issue</span>
               <h3 style={{margin: '0.25rem 0 0 0', color: remainingDue > 0 ? 'var(--error, #e53935)' : 'var(--success, #2e7d32)'}}>
                 {money(remainingDue)}
               </h3>
             </div>
           </div>
 
-          <Field label="Apply existing customer advance (₹)" hint="Oldest available advance balances will be drawn first.">
+          <div className="notice" style={{padding: '1rem'}}>
+            <strong>Initial payment</strong>
+            <p className="muted" style={{margin: '0.25rem 0 0.75rem'}}>Leave the amount empty when the full invoice will be paid later.</p>
+            <div className="stack">
+              {paymentRows.map((row, index) => <div className="payment-entry-row" key={index}>
+                <Field label="Payment method">
+                  <select value={row.method} onChange={event => updateRow(index, 'method', event.target.value)}>
+                    <option value="Cash">Cash</option>
+                    <option value="UPI">GPay / UPI</option>
+                    <option value="BankTransfer">Bank transfer</option>
+                    <option value="Card">Card</option>
+                  </select>
+                </Field>
+                <Field label="Amount received (₹)">
+                  <input type="number" min="0.01" max={totalRupees} step="0.01" value={row.amount} onChange={event => updateRow(index, 'amount', event.target.value)} placeholder="0.00" />
+                </Field>
+                <Field label="Reference / UTR">
+                  <input value={row.reference} onChange={event => updateRow(index, 'reference', event.target.value)} disabled={row.method === 'Cash'} placeholder={row.method === 'Cash' ? 'Not required for cash' : 'Optional transaction reference'} />
+                </Field>
+                {paymentRows.length > 1 && <Btn secondary onClick={() => removeRow(index)}>Remove</Btn>}
+              </div>)}
+              <div className="actions"><Btn secondary onClick={addRow}><Plus size={15}/> Add another payment method</Btn><span className="muted">Total received now: <strong>{money(paymentTotal)}</strong></span></div>
+              {paymentTotal > 0 && paymentTotal < totalRupees && <Field label="Remaining balance due date">
+                <input type="date" min={TODAY} value={nextDueDate} onChange={event => setNextDueDate(event.target.value)} />
+                <span className="muted">Optional reminder for the remaining {money(remainingDue)}.</span>
+              </Field>}
+            </div>
+          </div>
+
+          {false && <Field label="Apply existing customer advance (₹)" hint="Oldest available advance balances will be drawn first.">
             <input
               type="number"
               min="0"
@@ -175,9 +233,9 @@ export function IssueInvoiceModal({
               onChange={(e) => setApplyAdvance(Math.max(0, Math.min(totalRupees, parseFloat(e.target.value) || 0)))}
               placeholder="0.00"
             />
-          </Field>
+          </Field>}
 
-          <div>
+          {false && <div>
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
               <strong>Payment received at issue</strong>
               <Btn secondary onClick={addRow} style={{padding: '0.25rem 0.5rem', fontSize: '0.85rem'}}>
@@ -258,7 +316,7 @@ export function IssueInvoiceModal({
                 </tbody>
               </table>
             </div>
-          </div>
+          </div>}
 
           {excessAmount > 0 && (
             <div className="notice" style={{backgroundColor: '#e8f5e9', borderLeft: '4px solid #4caf50'}}>

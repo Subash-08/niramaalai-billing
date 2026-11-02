@@ -161,9 +161,10 @@ export async function settleInvoiceOnIssue(db: Db, identity: Identity, session: 
       company: sellerSnapshot,
       payment: {
         account: primaryComponent?.account || 'Cash',
-        method: primaryComponent?.method || 'Cash',
+        method: components.length > 1 ? components.map(component => component.method).join(' + ') : (primaryComponent?.method || 'Cash'),
         amountPaise: paymentTotal,
-        reference: primaryComponent?.reference || '',
+        reference: components.map(component => component.reference).filter(Boolean).join(', '),
+        components,
       },
       receiptDate: date,
       receiptNumber,

@@ -9,7 +9,7 @@ function move(s:State,p:Product,qty:number,reason:string,reference:string,date=T
 function validateLines(b:Bill|Purchase){check(b.lines.length,'Add at least one item.');b.lines.forEach(l=>{check(l.name.trim(),'Every line needs a description.');check(Number.isInteger(l.qty)&&l.qty>0,'Quantity must be a positive whole number.');check(Number.isFinite(l.rate)&&l.rate>=0,'Rate cannot be negative.');check(Number.isFinite(l.discount)&&l.discount>=0&&l.discount<=(l.discountType==='Amount'?l.qty*l.rate:100),'Discount cannot exceed the line value (or 100%).');check(Number.isFinite(l.tax)&&l.tax>=0&&l.tax<=100,'Enter a valid tax rate.');});}
 export function issueBill(state:State,b:Bill):State{
   if(b.kind!=='Quotation')assertOpen(state,b.date);
-  check(b.date<=TODAY&&b.due>=b.date,'Check the document date and due date.');
+  check(b.date<=TODAY&&(b.kind!=='Quotation'||b.due>=b.date),b.kind==='Quotation'?'Check the quotation date and valid-until date.':'Invoice date cannot be in the future.');
   validateLines(b);
   check(state.customers.some(c=>c.id===b.customerId),'Select a customer.');
   check(!state.bills.some(x=>x.id===b.id),'That document number already exists.');

@@ -48,7 +48,7 @@ export default function AccountAccess() {
               const response = await fetch('/api/auth/' + (signup ? 'signup' : 'login'), {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(signup ? form : {email: form.email, password: form.password}),
+                body: JSON.stringify(signup ? form : {email: form.email, password: form.password, rememberMe: true}),
               });
               const result = await response.json();
               if (!response.ok) throw new Error(result.error || result.message || 'Request failed');

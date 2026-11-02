@@ -11,6 +11,7 @@ import Templates from './templates';
 import ServiceCatalog from './service-catalog';
 import PrintJobs from './print-jobs';
 import Payments from './payments';
+import CustomerDues from './customer-dues';
 import {Empty} from './ui';
 import Link from 'next/link';
 import {useEffect} from 'react';
@@ -52,6 +53,7 @@ export default function Workspace(){
     case 'customers':return <People id={id}/>;
     case 'inventory':case 'products':return <Inventory id={id}/>;
     case 'payments':return <Payments id={id}/>;
+    case 'dues':return <CustomerDues/>;
     case 'sales':return id==='new'?<DocumentComposer key={routeKey}/>:<Documents id={id}/>;
     case 'templates':return <Templates/>;
     case 'service-catalog':return <ServiceCatalog/>;

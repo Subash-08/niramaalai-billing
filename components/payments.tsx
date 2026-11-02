@@ -17,6 +17,7 @@ import { money, TODAY, uid, roundedTotal } from '@/lib/domain';
 import { amountWords } from '@/lib/amount-words';
 import { receiptPdfBytes, paymentVoucherPdfBytes, downloadBytes } from '@/lib/exports';
 import SearchSelect from './search-select';
+import {useSearchParams} from 'next/navigation';
 
 interface UnpaidInvoice {
   id: string;
@@ -29,6 +30,7 @@ interface UnpaidInvoice {
 }
 
 export default function Payments({ id }: { id?: string }) {
+  const searchParams = useSearchParams();
   const {
     state,
     isLive,
@@ -81,6 +83,15 @@ export default function Payments({ id }: { id?: string }) {
   const [recordVoucherOpen, setRecordVoucherOpen] = useState(false);
   const [previewReceipt, setPreviewReceipt] = useState<any | null>(null);
   const [previewVoucher, setPreviewVoucher] = useState<any | null>(null);
+  const requestedInvoiceId = searchParams.get('invoiceId') || '';
+  const requestedCustomerId = searchParams.get('customerId') || '';
+
+  useEffect(() => {
+    if (requestedInvoiceId && requestedCustomerId) {
+      setActiveTab('received');
+      setRecordReceiptOpen(true);
+    }
+  }, [requestedInvoiceId, requestedCustomerId]);
 
   // Load server-side summary totals
   const refreshSummary = useCallback(async () => {
@@ -131,7 +142,7 @@ export default function Payments({ id }: { id?: string }) {
       setVouchersTotal(res.total || 0);
       setVoucherTotalPages(res.totalPages || 1);
     } catch (e: any) {
-      if (isLive) notify(e.message || 'Failed to load payment vouchers.');
+      if (isLive) notify(e.message || 'Failed to load money-paid records.');
     } finally {
       setLoadingVouchers(false);
     }
@@ -166,7 +177,7 @@ export default function Payments({ id }: { id?: string }) {
     <div className="payments-page" style={{ padding: '0 0 3rem 0' }}>
       <PageHead
         title="Payments & receipts"
-        description="Record single-invoice customer payments, manage outgoing expense vouchers, and view printable records."
+        description="Record customer receipts and money paid for business expenses, with printable records."
         actions={
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             <Btn
@@ -186,7 +197,7 @@ export default function Payments({ id }: { id?: string }) {
               style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
             >
               <ArrowUpRight size={16} />
-              Record payment voucher
+              Record money paid
             </Btn>
             <Link
               href="/sales/new?taxType=non-gst"
@@ -252,7 +263,7 @@ export default function Payments({ id }: { id?: string }) {
           }}
         >
           <ArrowUpRight size={18} />
-          Money paid (Payment Vouchers)
+          Money paid
         </button>
       </div>
 
@@ -397,9 +408,11 @@ export default function Payments({ id }: { id?: string }) {
                     const rDate = r.date || String(r.createdAt || '').slice(0, 10);
                     const custName = r.customerSnapshot?.name || state.customers.find((c: any) => c.id === r.customerId)?.name || 'Customer';
                     const targetInvoice = r.allocations?.[0]?.targetId || r.invoiceId || '-';
-                    const comp = r.components?.[0] || {};
-                    const method = comp.method || r.method || 'Cash';
-                    const amt = (r.amountPaise || comp.amountPaise || 0) / 100;
+                    const receiptComponents = r.components || [];
+                    const comp = receiptComponents[0] || {};
+                    const method = receiptComponents.length > 1 ? receiptComponents.map((item: any) => item.method).join(' + ') : (comp.method || r.method || 'Cash');
+                    const references = receiptComponents.map((item: any) => item.reference).filter(Boolean).join(', ');
+                    const amt = (r.totalAmountPaise || r.amountPaise || receiptComponents.reduce((sum: number, item: any) => sum + (item.amountPaise || 0), 0)) / 100;
 
                     return (
                       <tr key={r._id || r.id} style={{ borderBottom: '1px solid var(--border, #f3f4f6)' }}>
@@ -417,9 +430,9 @@ export default function Payments({ id }: { id?: string }) {
                         </td>
                         <td style={{ padding: '0.65rem 0.75rem' }}>
                           <Badge>{method}</Badge>
-                          {comp.reference && (
+                          {references && (
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #9ca3af)' }}>
-                              Ref: {comp.reference}
+                              Ref: {references}
                             </div>
                           )}
                         </td>
@@ -525,7 +538,7 @@ export default function Payments({ id }: { id?: string }) {
 
       {/* Tab 2: Money Paid (Payment Vouchers) */}
       {activeTab === 'paid' && (
-        <Card title="Payment Vouchers" sub="Outgoing expenses and cash/bank payment disbursements.">
+        <Card title="Money paid" sub="Record business expenses paid by cash, UPI, bank transfer or card.">
           {/* Filters Bar */}
           <div
             style={{
@@ -597,15 +610,15 @@ export default function Payments({ id }: { id?: string }) {
           {/* Table */}
           {loadingVouchers ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted, #6b7280)' }}>
-              Loading payment vouchers...
+              Loading money-paid records...
             </div>
           ) : vouchers.length === 0 ? (
             <Empty
-              title="No payment vouchers found"
-              text="Record an outgoing business payment to create your first voucher."
+              title="No money-paid records found"
+              text="Record money paid for a business expense to create your first entry."
               action={
                 <Btn onClick={() => setRecordVoucherOpen(true)}>
-                  <Plus size={16} /> Record payment voucher
+                  <Plus size={16} /> Record money paid
                 </Btn>
               }
             />
@@ -697,6 +710,7 @@ export default function Payments({ id }: { id?: string }) {
       {recordReceiptOpen && (
         <RecordReceiptModal
           isOpen={recordReceiptOpen}
+          preselectedInvoice={requestedInvoiceId ? {id: requestedInvoiceId, customerId: requestedCustomerId} : undefined}
           onClose={() => setRecordReceiptOpen(false)}
           onSuccess={(receipt) => {
             setRecordReceiptOpen(false);
@@ -766,6 +780,7 @@ export function RecordReceiptModal({
   const [method, setMethod] = useState<'Cash' | 'UPI' | 'BankTransfer' | 'Card'>('Cash');
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
+  const [nextDueDate, setNextDueDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [idempotencyKey] = useState(() => `rcpt-idem-${Date.now()}-${uid('K')}`);
   const [invoiceSearchQuery, setInvoiceSearchQuery] = useState('');
@@ -873,6 +888,10 @@ export function RecordReceiptModal({
       }
       return;
     }
+    if (remainingDuePaise > 0 && nextDueDate && nextDueDate < date) {
+      notify('The next due date cannot be before the receipt date.');
+      return;
+    }
 
     setBusy(true);
     try {
@@ -904,7 +923,19 @@ export function RecordReceiptModal({
         throw new Error(result.error || 'Failed to record receipt.');
       }
 
+      if (remainingDuePaise > 0 && nextDueDate) {
+        const dueResponse = await fetch(`/api/sales/invoices/${encodeURIComponent(selectedInvoice.id)}/due-date`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({promisedPaymentDate: nextDueDate, notes: notes.trim()}),
+        });
+        if (!dueResponse.ok) {
+          notify('Receipt was recorded, but the reminder date could not be saved. You can set it from Customer dues.');
+        }
+      }
+
       notify('Receipt recorded successfully.');
+      window.dispatchEvent(new Event('billing-data-changed'));
       onSuccess(result.receipt || {
         ...payload,
         receiptNumber: `RCP-${Date.now().toString().slice(-4)}`,
@@ -1167,6 +1198,17 @@ export function RecordReceiptModal({
                 Payment cannot exceed {money(invoiceDuePaise / 100)}. Multi-invoice allocation and advance overpayments are not permitted.
               </div>
             )}
+            {remainingDuePaise > 0 && isAmountValid && (
+              <div style={{marginTop: '1rem', maxWidth: '320px'}}>
+                <label style={{display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem'}}>
+                  Next payment due date <span style={{fontWeight: 400, color: 'var(--text-muted, #6b7280)'}}>(optional)</span>
+                </label>
+                <input type="date" min={date} value={nextDueDate} onChange={event => setNextDueDate(event.target.value)} />
+                <small style={{display: 'block', marginTop: '4px', color: 'var(--text-muted, #6b7280)'}}>
+                  Use this only when a balance remains. It creates a reminder and does not change the amount due.
+                </small>
+              </div>
+            )}
           </div>
         )}
 
@@ -1247,30 +1289,30 @@ export function RecordVoucherModal({
         idempotencyKey,
       };
       const result = await createPaymentVoucherApi(payload);
-      if (!result.success) throw new Error(result.error || 'Failed to record payment voucher.');
-      notify('Payment voucher created successfully.');
+      if (!result.success) throw new Error(result.error || 'Failed to record money paid.');
+      notify('Money paid recorded successfully.');
       onSuccess(result.voucher || {...payload, voucherNumber: `PV-${Date.now().toString().slice(-4)}`});
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Error recording payment voucher.');
+      notify(error instanceof Error ? error.message : 'Error recording money paid.');
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Modal title="Record Payment Voucher" onClose={onClose} wide>
+    <Modal title="Record money paid" onClose={onClose} wide>
       <form onSubmit={handleSubmit} className="voucher-form">
         <div className="voucher-form-grid">
           <div>
-            <label className="voucher-field-label">Voucher Date <span>*</span></label>
+            <label className="voucher-field-label">Payment date <span>*</span></label>
             <input type="date" value={date} required onChange={(event) => setDate(event.target.value)} />
           </div>
           <div>
-            <label className="voucher-field-label">Paid To (Payee Name) <span>*</span></label>
+            <label className="voucher-field-label">Paid to <span>*</span></label>
             <input type="text" required placeholder="e.g. Transport charges, Landlord, Technician" value={payeeName} onChange={(event) => setPayeeName(event.target.value)} />
           </div>
           <div>
-            <label className="voucher-field-label">Payment Method <span>*</span></label>
+            <label className="voucher-field-label">How was it paid? <span>*</span></label>
             <select value={method} onChange={(event) => setMethod(event.target.value as typeof method)}>
               <option value="Cash">Cash</option>
               <option value="UPI">UPI</option>
@@ -1284,7 +1326,7 @@ export function RecordVoucherModal({
             <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={amountStr} onChange={(event) => setAmountStr(event.target.value)} />
           </div>
           <div>
-            <label className="voucher-field-label">Purpose / Expense Category <span>*</span></label>
+            <label className="voucher-field-label">Reason / expense category <span>*</span></label>
             <input type="text" required placeholder="e.g. Transport, rent, machine service" value={purpose} onChange={(event) => setPurpose(event.target.value)} />
           </div>
           <div>
@@ -1298,7 +1340,7 @@ export function RecordVoucherModal({
         </div>
         <div className="form-actions">
           <Btn secondary onClick={onClose} disabled={busy}>Cancel</Btn>
-          <Btn type="submit" disabled={busy || payingPaise <= 0}>{busy ? 'Recording…' : 'Record Payment Voucher'}</Btn>
+          <Btn type="submit" disabled={busy || payingPaise <= 0}>{busy ? 'Recording…' : 'Save money paid'}</Btn>
         </div>
       </form>
     </Modal>
@@ -1324,9 +1366,10 @@ export function ReceiptPreviewModal({
 
   const rNum = snap?.receiptNumber || receipt.receiptNumber || receipt._id || receipt.id || 'RCP';
   const rDate = snap?.receiptDate || receipt.date || (receipt.createdAt ? String(receipt.createdAt).slice(0, 10) : '');
-  const comp = receipt.components?.[0] || {};
-  const method = snap?.payment?.method || comp.method || receipt.method || 'Cash';
-  const ref = snap?.payment?.reference || comp.reference || receipt.reference || '-';
+  const receiptComponents = receipt.components || snap?.payment?.components || [];
+  const comp = receiptComponents[0] || {};
+  const method = receiptComponents.length > 1 ? receiptComponents.map((item: any) => item.method).join(' + ') : (snap?.payment?.method || comp.method || receipt.method || 'Cash');
+  const ref = receiptComponents.map((item: any) => item.reference).filter(Boolean).join(', ') || snap?.payment?.reference || comp.reference || receipt.reference || '-';
 
   const alloc = receipt.allocations?.[0];
   const amountPaidPaise = snap?.amountAppliedPaise
@@ -1415,6 +1458,7 @@ export function ReceiptPreviewModal({
             <div><strong>Receipt No:</strong> {rNum}</div>
             <div><strong>Date:</strong> {rDate}</div>
             <div><strong>Payment Mode:</strong> {method}</div>
+            {receiptComponents.length > 1 && <div><strong>Payment Split:</strong> {receiptComponents.map((item: any) => `${item.method}: ${money((item.amountPaise || 0) / 100)}`).join(' · ')}</div>}
             <div><strong>Ref / UTR:</strong> {ref}</div>
           </div>
         </div>
@@ -1550,7 +1594,7 @@ export function VoucherPreviewModal({
   }
 
   return (
-    <Modal title={`Payment Voucher ${vNum}`} onClose={onClose} wide>
+    <Modal title={`Money paid ${vNum}`} onClose={onClose} wide>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '1rem' }} className="no-print">
         <Btn secondary onClick={handlePrint} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Printer size={15} /> Print
@@ -1574,7 +1618,7 @@ export function VoucherPreviewModal({
         }}
       >
         <div style={{ textAlign: 'center', borderBottom: '2px solid #111827', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
-          <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, letterSpacing: '2px' }}>PAYMENT VOUCHER</h1>
+          <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, letterSpacing: '2px' }}>MONEY PAID RECORD</h1>
           <small style={{ color: '#4b5563', fontSize: '0.8rem', textTransform: 'uppercase' }}>Payment confirmation</small>
         </div>
 

@@ -310,6 +310,7 @@ export function StoreProvider({children}: {children: ReactNode}) {
           invoiceNumberPadding: boot.company.invoiceNumberPadding ?? 4,
           invoiceIncludeFinancialYear: boot.company.invoiceIncludeFinancialYear !== false,
           invoiceNumberSeparator: boot.company.invoiceNumberSeparator ?? '-',
+          invoiceNumberingStatus: boot.company.invoiceNumberingStatus,
           logo: boot.company.logoFileId ? `/api/files/${boot.company.logoFileId}` : '',
         },
         customers: (boot.firstCustomers || []).map(mapCustomerFromApi),

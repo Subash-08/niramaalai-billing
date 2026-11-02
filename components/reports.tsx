@@ -22,6 +22,11 @@ const reportNames = [
   'Invoice exports',
 ];
 
+function financialYearStart(date: string): string {
+  const year = Number(date.slice(0, 4));
+  return `${Number(date.slice(5, 7)) >= 4 ? year : year - 1}-04-01`;
+}
+
 export default function Reports() {
   const {state, role, notify, isLive, fetchInvoicesPage} = useStore();
   const [customer, setCustomer] = useState('All customers');
@@ -29,7 +34,7 @@ export default function Reports() {
   const [template, setTemplate] = useState(state.defaultTemplateId);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState('Sales');
-  const [from, setFrom] = useState(TODAY.slice(0, 8) + '01');
+  const [from, setFrom] = useState(financialYearStart(TODAY));
   const [to, setTo] = useState(TODAY);
   const [category, setCategory] = useState('All categories');
   const [batch, setBatch] = useState(false);
@@ -39,6 +44,8 @@ export default function Reports() {
   const [reportError, setReportError] = useState('');
   const [filterText, setFilterText] = useState('');
   const [batchBills, setBatchBills] = useState<any[]>([]);
+  const [exportBills, setExportBills] = useState<any[]>([]);
+  const [exportTotal, setExportTotal] = useState(0);
 
   useEffect(() => {
     if (!isLive) return;
@@ -84,6 +91,51 @@ export default function Reports() {
     };
   }, [isLive, report, from, to, customer, paymentStatus, category, role, notify]);
 
+  useEffect(() => {
+    if (!isLive || report !== 'Invoice exports') return;
+
+    let active = true;
+    setLoading(true);
+    setReportError('');
+    const status = paymentStatus === 'Paid' ? 'Paid' : paymentStatus === 'Unpaid / partial' ? 'Unpaid' : 'Issued';
+    const businessCategory = category === 'New goods' ? 'NewGoods' : category === 'Used goods' ? 'UsedGoods' : category === 'Service' ? 'Service' : undefined;
+    const taxType = category === 'Tax invoices' ? 'GST' : category === 'Non-GST invoices' ? 'NonGST' : undefined;
+
+    fetchInvoicesPage({
+      page: 1,
+      limit: 100,
+      status,
+      search: filterText.trim() || undefined,
+      dateFrom: from,
+      dateTo: to,
+      customerId: customer !== 'All customers' ? customer : undefined,
+      businessCategory,
+      taxType,
+    })
+      .then(result => {
+        if (!active) return;
+        setExportBills(result.records);
+        setExportTotal(result.total);
+        const ids = new Set(result.records.map((bill: any) => bill.id));
+        setSelected(current => current.filter(id => ids.has(id)));
+      })
+      .catch(error => {
+        if (!active) return;
+        const message = error instanceof Error ? error.message : 'Failed to load invoices for export.';
+        setReportError(message);
+        setExportBills([]);
+        setExportTotal(0);
+        notify(message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isLive, report, from, to, customer, paymentStatus, category, filterText, fetchInvoicesPage, notify]);
+
   // Demo fallback calculations
   const bills = state.bills.filter(
     (b) =>
@@ -107,6 +159,7 @@ export default function Reports() {
     if (report === 'Non-GST sales') return isNonGst;
     return true;
   });
+  const invoiceExportBills = isLive ? exportBills : bills;
 
   const demoRows: (string | number)[][] =
     report === 'GST / Non-GST sales'
@@ -210,6 +263,10 @@ export default function Reports() {
         label: headers[index], count: false,
         value: rows.reduce((n, row) => n + (typeof row[index] === 'number' ? Math.round((row[index] as number) * 100) : 0), 0) / 100,
       }));
+  if (report === 'Service sales' && summaryCards[0]) summaryCards[0].count = true;
+  const matchingRecordCount = report === 'GST / Non-GST sales'
+    ? rows.reduce((sum, row) => sum + Number(row[1] || 0), 0)
+    : rows.length;
 
 
   function preset(days: number) {
@@ -232,6 +289,7 @@ export default function Reports() {
           page: 1,
           limit: 100,
           status,
+          search: filterText.trim() || undefined,
           dateFrom: from,
           dateTo: to,
           customerId: customer !== 'All customers' ? customer : undefined,
@@ -268,7 +326,7 @@ export default function Reports() {
         title="Reports"
         description="Review the numbers, open the source records and prepare your accountant’s documents."
         actions={
-          <ExportButtons
+          report === 'Invoice exports' ? undefined : <ExportButtons
             title={report}
             headers={headers}
             rows={rows}
@@ -300,7 +358,7 @@ export default function Reports() {
           {loading && <div className="notice" role="status">Loading report…</div>}
           {reportError && <div className="notice" role="alert">{reportError} Change a filter to retry. No demo data is shown.</div>}
           {report !== 'Invoice exports' && !loading && !reportError && <div className="stats-grid">
-            <Card title="Matching records"><div className="body-pad"><h2>{rows.length}</h2><small>Current filters</small></div></Card>
+            <Card title="Matching records"><div className="body-pad"><h2>{matchingRecordCount}</h2><small>Current filters</small></div></Card>
             {summaryCards.map(card => <Card key={card.label} title={card.label}><div className="body-pad"><h2>{card.count ? card.value : money(card.value)}</h2><small>Current filters · same records as export</small></div></Card>)}
           </div>}
           <Card
@@ -385,6 +443,9 @@ export default function Reports() {
               <button className="link-button" onClick={() => preset(90)}>
                 90 days
               </button>
+              <button className="link-button" onClick={() => {setFrom(financialYearStart(TODAY)); setTo(TODAY); setSelected([]);}}>
+                Financial year
+              </button>
 
               <Field label="Search results">
                 <div style={{position: 'relative'}}>
@@ -393,7 +454,7 @@ export default function Reports() {
                 </div>
               </Field>
 
-              {['Sales', 'Invoice exports', 'Tax summary'].includes(report) && (
+              {['Sales', 'Invoice exports'].includes(report) && (
                 <select
                   aria-label="Report category"
                   value={category}
@@ -427,11 +488,11 @@ export default function Reports() {
                         <input
                           type="checkbox"
                           checked={
-                            !!bills.length &&
-                            bills.every((b) => selected.includes(b.id))
+                            !!invoiceExportBills.length &&
+                            invoiceExportBills.every((b) => selected.includes(b.id))
                           }
                           onChange={(e) =>
-                            setSelected(e.target.checked ? bills.map((b) => b.id) : [])
+                            setSelected(e.target.checked ? invoiceExportBills.map((b) => b.id) : [])
                           }
                         />
                         Select all
@@ -449,7 +510,7 @@ export default function Reports() {
                         </select>
                       </Field>
                       <Btn
-                        disabled={busy || (!isLive && !bills.some((b) => selected.includes(b.id)))}
+                        disabled={busy || !invoiceExportBills.length}
                         onClick={zipInvoices}
                       >
                         {busy ? 'Preparing ZIP…' : 'Download invoice ZIP'}
@@ -474,7 +535,7 @@ export default function Reports() {
                           </tr>
                         </thead>
                         <tbody>
-                          {bills.map((b) => (
+                          {invoiceExportBills.map((b) => (
                             <tr key={b.id}>
                               <td>
                                 <input
@@ -499,9 +560,9 @@ export default function Reports() {
                                 {state.customers.find((c) => c.id === b.customerId)?.name}
                               </td>
                               <td>
-                                {b.lines.some((l) => l.tax > 0)
-                                  ? 'Tax invoice'
-                                  : 'Non-GST invoice'}
+                                {b.lines.length > 0 && b.lines.every((l: any) => l.taxTreatment === 'NonGST')
+                                  ? 'Non-GST invoice'
+                                  : 'GST invoice'}
                                 <small>{b.category}</small>
                               </td>
                               <td>{money(roundedTotal(b))}</td>
@@ -546,14 +607,14 @@ export default function Reports() {
                     Loading authoritative report…
                   </div>
                 )}
-                {!loading && !rows.length && (
+                {!loading && !(report === 'Invoice exports' ? invoiceExportBills.length : rows.length) && (
                   <Empty
                     title="No records in this selection"
-                    text="Try another report or date range."
+                    text="Try a wider date range or clear another filter."
                   />
                 )}
                 <div className="table-footer">
-                  {rows.length} records
+                  {report === 'Invoice exports' ? `${invoiceExportBills.length}${exportTotal > invoiceExportBills.length ? ` of ${exportTotal}` : ''}` : rows.length} records
                 </div>
               </>
             )}
@@ -562,7 +623,7 @@ export default function Reports() {
       </div>
       {batch && (
         <PrintDialog
-          bills={batchBills.length ? batchBills : bills.filter((b) => selected.includes(b.id))}
+          bills={batchBills.length ? batchBills : invoiceExportBills.filter((b) => selected.includes(b.id))}
           onClose={() => {setBatch(false); setBatchBills([]);}}
         />
       )}

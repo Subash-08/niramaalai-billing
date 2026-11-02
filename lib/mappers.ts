@@ -54,6 +54,7 @@ export function mapProductFromApi(doc: any): Product {
     hsn: doc.hsn || '',
     cost: (doc.costPaise || 0) / 100,
     price: (doc.sellingPricePaise || 0) / 100,
+    priceEntryMode: doc.priceEntryMode === 'Exclusive' ? 'Exclusive' : 'Inclusive',
     tax: taxBasisPoints / 100,
     stock: typeof doc.stock === 'number' ? doc.stock : 0,
     low: doc.low !== undefined && doc.low !== null ? doc.low : 2,

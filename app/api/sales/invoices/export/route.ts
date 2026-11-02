@@ -5,6 +5,7 @@ import {MAX_EXPORT_ROWS} from '@/server/purchase-schema';
 import ExcelJS from 'exceljs';
 import {jsPDF} from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {invoiceTaxTypeQuery} from '@/server/invoice-classification';
 
 export const runtime = 'nodejs';
 
@@ -49,8 +50,7 @@ export async function GET(request: Request) {
     }
     if (customerId) filter.customerId = customerId;
     if (businessCategory && ['NewGoods', 'UsedGoods', 'Service'].includes(businessCategory)) filter.businessCategory = businessCategory;
-    if (taxType === 'NonGST') filter.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
-    if (taxType === 'GST') filter.lines = {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}};
+    Object.assign(filter, invoiceTaxTypeQuery(taxType));
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [

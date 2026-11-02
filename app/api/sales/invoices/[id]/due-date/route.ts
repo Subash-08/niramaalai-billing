@@ -37,6 +37,7 @@ export async function PATCH(
         $set: {
           promisedPaymentDate: body.promisedPaymentDate,
           promisedDateNotes: body.notes || '',
+          dueReminderDismissed: false,
           updatedAt: now,
           updatedBy: identity.userId,
         },

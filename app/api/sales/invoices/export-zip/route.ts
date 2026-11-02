@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import {jsPDF} from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type {InvoiceDocument} from '@/server/sales-service';
+import {invoiceTaxTypeQuery, isNonGstInvoiceLines} from '@/server/invoice-classification';
 
 export const runtime = 'nodejs';
 
@@ -60,8 +61,7 @@ export async function GET(request: Request) {
     if (businessCategory && ['NewGoods', 'UsedGoods', 'Service'].includes(businessCategory)) {
       filter.businessCategory = businessCategory;
     }
-    if (taxType === 'NonGST') filter.lines = {$not: {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}}};
-    if (taxType === 'GST') filter.lines = {$elemMatch: {taxTreatment: {$ne: 'NonGST'}}};
+    Object.assign(filter, invoiceTaxTypeQuery(taxType));
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [
@@ -238,7 +238,7 @@ export async function GET(request: Request) {
 
       const fields = tmpl.fields || {};
       const exportLines = snap.lines || inv.lines || [];
-      const isNonGst = exportLines.length > 0 && exportLines.every((line: any) => line.taxTreatment === 'NonGST');
+      const isNonGst = isNonGstInvoiceLines(exportLines);
       const accentRgb = hexToRgb(tmpl.accent || '#1e293b');
       const doc = new jsPDF({
         orientation: tmpl.orientation || 'portrait',

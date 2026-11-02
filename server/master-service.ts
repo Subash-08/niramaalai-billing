@@ -55,6 +55,10 @@ export async function getCompanySettings(identity: Identity) {
   const settings = await col(db, 'companySettings').findOne({tenantId: identity.tenantId});
   if (!settings) {
     const tenant = await col(db, 'tenants').findOne({_id: identity.tenantId});
+    const today = todayInKolkata();
+    const year = Number(today.slice(0, 4));
+    const month = Number(today.slice(5, 7));
+    const financialYear = month >= 4 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
     return {
       tenantId: identity.tenantId,
       name: tenant?.companyName || 'My Store',
@@ -86,11 +90,23 @@ export async function getCompanySettings(identity: Identity) {
       invoiceNumberPadding: 4,
       invoiceIncludeFinancialYear: true,
       invoiceNumberSeparator: '-',
+      invoiceNumberingStatus: {financialYear, gstLast: 0, gstNext: 1, nonGstLast: 0, nonGstNext: 1},
       logoFileId: '',
       demoImported: false,
     };
   }
-  return settings;
+  const today = todayInKolkata();
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
+  const financialYear = month >= 4 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+  const counterYear = settings.invoiceIncludeFinancialYear === false ? 'ALL' : financialYear;
+  const [gstCounter, nonGstCounter] = await Promise.all([
+    col(db, 'tenantCounters').findOne({_id: `CNT-${identity.tenantId}-Invoice-${counterYear}`, tenantId: identity.tenantId}, {projection: {currentValue: 1}}),
+    col(db, 'tenantCounters').findOne({_id: `CNT-${identity.tenantId}-NonGSTInvoice-${counterYear}`, tenantId: identity.tenantId}, {projection: {currentValue: 1}}),
+  ]);
+  const gstLast = Number(gstCounter?.currentValue || 0);
+  const nonGstLast = settings.invoiceNumberingMode === 'shared' ? gstLast : Number(nonGstCounter?.currentValue || 0);
+  return {...settings, invoiceNumberingStatus: {financialYear: counterYear, gstLast, gstNext: gstLast + 1, nonGstLast, nonGstNext: nonGstLast + 1}};
 }
 
 export async function updateCompanySettings(identity: Identity, input: CompanySettingsInput) {

@@ -61,7 +61,7 @@ export function ProductForm({
     unit: product?.unit || 'Piece',
     price: product?.price || 0,
     priceEntryMode: (product as any)?.priceEntryMode || 'Inclusive',
-    tax: product?.tax ?? 18,
+    tax: product && [5,12,18,28].includes(product.tax) ? product.tax : 18,
     hsn: product?.hsn || '',
     brand: product?.brand || '',
     model: product?.model || '',
@@ -83,6 +83,10 @@ export function ProductForm({
     }
     if (f.price < 0) {
       setError('Selling rate must be non-negative.');
+      return;
+    }
+    if (![5,12,18,28].includes(f.tax)) {
+      setError('Choose a GST rate of 5%, 12%, 18% or 28%.');
       return;
     }
 
@@ -124,7 +128,7 @@ export function ProductForm({
   }
 
   const content = (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <form className="product-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {error && (
         <div style={{ padding: '0.65rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '6px', fontSize: '0.85rem' }}>
           {error}
@@ -276,7 +280,6 @@ export function ProductForm({
               fontSize: '0.9rem',
             }}
           >
-            <option value={0}>0% (Nil / Exempt)</option>
             <option value={5}>5%</option>
             <option value={12}>12%</option>
             <option value={18}>18%</option>

@@ -48,7 +48,7 @@ import { Truck } from 'lucide-react';
 import { PersonForm } from './people';
 import { InvoiceTemplate } from '@/lib/extensions';
 import { TemplateInvoice as InvoicePaper, PrintDialog } from './templates';
-import { mapPurchaseFromApi, mapInvoiceFromApi, mapQuotationFromApi, mapTemplateFromApi, mapProductFromApi, mapServiceFromApi } from '@/lib/mappers';
+import { mapPurchaseFromApi, mapInvoiceFromApi, mapQuotationFromApi, mapTemplateFromApi, mapProductFromApi, mapServiceFromApi, mapSupplierFromApi, mapCustomerFromApi } from '@/lib/mappers';
 import {
   IssueInvoiceModal,
   InvoiceCancelModal,
@@ -56,6 +56,32 @@ import {
 import { RecordReceiptModal } from './payments';
 
 export { InvoicePaper };
+
+function QuickServiceForm({onClose, onSave}: {onClose: () => void; onSave: (service: any) => Promise<void>}) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    id: uid('SRV'), name: '', category: 'Digital printing', description: '', unit: 'Job',
+    rate: 0, tax: 18, sac: '998912', warranty: 0, active: true,
+  });
+  return <Modal title="Create service" onClose={onClose}>
+    <form onSubmit={async (event) => {
+      event.preventDefault();
+      setSaving(true);
+      try { await onSave(form); } finally { setSaving(false); }
+    }}>
+      <div className="form-body form-grid">
+        <Field label="Service name *"><input required autoFocus value={form.name} onChange={event => setForm({...form, name: event.target.value})}/></Field>
+        <Field label="Category"><input required value={form.category} onChange={event => setForm({...form, category: event.target.value})}/></Field>
+        <Field label="Billing unit"><select value={form.unit} onChange={event => setForm({...form, unit: event.target.value})}>{['Piece','Sheet','Page','Set','Book','Box','Square foot','Roll','Pack','Job'].map(unit => <option key={unit}>{unit}</option>)}</select></Field>
+        <Field label="Standard rate (₹) *"><input required type="number" min="0" step="0.01" value={form.rate} onChange={event => setForm({...form, rate: Number(event.target.value)})}/></Field>
+        <Field label="GST rate %"><select value={form.tax} onChange={event => setForm({...form, tax: Number(event.target.value)})}>{[5,12,18,28].map(rate => <option key={rate} value={rate}>{rate}%</option>)}</select></Field>
+        <Field label="SAC"><input value={form.sac} onChange={event => setForm({...form, sac: event.target.value})}/></Field>
+        <div className="full"><Field label="Description / specifications *"><textarea required value={form.description} onChange={event => setForm({...form, description: event.target.value})}/></Field></div>
+      </div>
+      <div className="form-actions"><Btn secondary onClick={onClose}>Cancel</Btn><Btn type="submit" disabled={saving}>{saving ? 'Saving…' : 'Create service'}</Btn></div>
+    </form>
+  </Modal>;
+}
 
 const blankLine = (): Line => ({
   productId: '',
@@ -101,6 +127,7 @@ export function DocumentComposer({
     saveInvoiceDraftApi,
     fetchInvoiceDetailApi,
     issueInvoiceApi,
+    saveServiceApi,
     refreshMasterData,
   } = useStore();
   const router = useRouter();
@@ -164,7 +191,7 @@ export function DocumentComposer({
   });
 
   const [date, setDate] = useState(TODAY);
-  const [due, setDue] = useState(existing?.due || '2026-09-17');
+  const [due, setDue] = useState(existing?.due || TODAY);
   const [taxMode, setTaxMode] = useState<'Intra-state' | 'Inter-state'>(
     existing?.taxMode || source?.taxMode || 'Intra-state'
   );
@@ -195,6 +222,7 @@ export function DocumentComposer({
   const [newPerson, setNewPerson] = useState(false);
   const [review, setReview] = useState(false);
   const [newProduct, setNewProduct] = useState(false);
+  const [newService, setNewService] = useState(false);
   const [serviceId, setServiceId] = useState('');
   const [payRows, setPayRows] = useState<{ account: string; amount: string; method: string }[]>([]);
   const nonGstTemplate = state.templates.find((template) =>
@@ -217,7 +245,7 @@ export function DocumentComposer({
   // The address on a document is a snapshot. It may be corrected for this one
   // invoice without silently changing the customer's master record.
   const [billTo, setBillTo] = useState(
-    source?.billTo || { name: '', address: '', phone: '', state: '', stateCode: '', postalCode: '' }
+    source?.billTo || { name: '', address: '', phone: '', state: 'Tamil Nadu', stateCode: '33', postalCode: '' }
   );
   const [orderRef, setOrderRef] = useState('');
   const [deliveryNote, setDeliveryNote] = useState('');
@@ -250,6 +278,15 @@ export function DocumentComposer({
       100 + state.bills.length + state.purchases.length + 1
     ).padStart(4, '0')}`
   );
+  const numbering = state.settings.invoiceNumberingStatus;
+  const expectedSerial = nonGst ? numbering?.nonGstNext : numbering?.gstNext;
+  const expectedPrefix = nonGst
+    ? (state.settings.nonGstInvoicePrefix || 'NGST')
+    : (state.settings.gstInvoicePrefix || state.settings.invoicePrefix || 'INV');
+  const expectedSeparator = state.settings.invoiceNumberSeparator ?? '-';
+  const expectedNumber = expectedSerial
+    ? [expectedPrefix, ...(state.settings.invoiceIncludeFinancialYear !== false && numbering?.financialYear !== 'ALL' ? [numbering?.financialYear] : []), String(expectedSerial).padStart(state.settings.invoiceNumberPadding ?? 4, '0')].join(expectedSeparator)
+    : 'Assigned safely when invoice is issued';
 
   const person = purchase
     ? supplierChoices.find((c) => c.id === customerId) || state.suppliers.find((c) => c.id === customerId)
@@ -261,7 +298,7 @@ export function DocumentComposer({
       name: person.name || '',
       address: person.address || '',
       phone: person.phone || '',
-      state: (person as any)?.details?.state || (person as any)?.state || '',
+      state: (person as any)?.details?.state || (person as any)?.state || 'Tamil Nadu',
       stateCode: (person as any)?.stateCode || '',
       postalCode: (person as any)?.details?.postalCode || (person as any)?.postalCode || '',
     };
@@ -273,7 +310,7 @@ export function DocumentComposer({
     id,
     customerId,
     date,
-    due,
+    due: quotation ? due : '',
     kind: quotation ? 'Quotation' : service ? 'Service' : 'Sale',
     category,
     status: quotation ? 'Draft' : 'Issued',
@@ -633,12 +670,12 @@ export function DocumentComposer({
     }
   }
 
-  function addProduct() {
+  function addProduct(selectedId = product) {
     if (isReceiptMode) {
       notify('Receive products already on this purchase. Create a separate purchase for additional items.');
       return;
     }
-    const p = productChoices.find((p) => p.id === product) || state.products.find((p) => p.id === product);
+    const p = productChoices.find((p) => p.id === selectedId) || state.products.find((p) => p.id === selectedId);
     if (!p) return;
     if (lines.some((l) => l.productId === p.id && l.lineType !== 'Charge')) {
       notify('This product is already added. Change its quantity in the row.');
@@ -655,13 +692,13 @@ export function DocumentComposer({
         unit: p.unit || 'Piece',
         qty: 1,
         rate: purchase
-          ? inclusive
+          ? p.priceEntryMode !== 'Exclusive'
             ? p.cost
             : p.cost / (1 + p.tax / 100)
-          : inclusive
+          : p.priceEntryMode !== 'Exclusive'
             ? p.price
-            : Math.round((p.price / (1 + p.tax / 100)) * 100) / 100,
-        inclusive: nonGst ? false : inclusive,
+            : p.price,
+        inclusive: nonGst ? false : p.priceEntryMode !== 'Exclusive',
         discount: 0,
         tax: nonGst ? 0 : p.tax,
         taxTreatment: nonGst ? 'NonGST' : 'Taxable',
@@ -676,6 +713,30 @@ export function DocumentComposer({
     setProduct('');
   }
 
+  function addService(selectedId: string) {
+    const x = state.serviceCatalog.find((item) => item.id === selectedId && item.active);
+    if (!x) return;
+    setLines((current) => [
+      ...current,
+      {
+        ...blankLine(),
+        lineType: 'Service',
+        serviceId: x.id,
+        name: x.name,
+        details: x.description || '',
+        unit: x.unit || 'Job',
+        rate: x.rate,
+        inclusive: nonGst ? false : true,
+        tax: nonGst ? 0 : x.tax,
+        taxTreatment: nonGst ? 'NonGST' : 'Taxable',
+        hsn: x.sac,
+        warranty: x.warranty,
+        clientLineKey: uid('CLK'),
+      } as any,
+    ]);
+    setServiceId('');
+  }
+
   function reorder(i: number, dir: number) {
     const next = [...lines];
     [next[i], next[i + dir]] = [next[i + dir], next[i]];
@@ -683,8 +744,8 @@ export function DocumentComposer({
   }
 
   function validateBasic(): boolean {
-    if (!purchase && (!billTo.name.trim() || !billTo.address.trim() || !billTo.state.trim())) {
-      notify('Enter the bill-to name, address and state for this document.');
+    if (!purchase && (!billTo.name.trim() || !billTo.address.trim())) {
+      notify('Enter the bill-to name and address for this document.');
       return false;
     }
     if (shipSeparate && (!shipTo.name.trim() || !shipTo.address.trim() || !shipTo.state.trim())) {
@@ -707,24 +768,33 @@ export function DocumentComposer({
         return false;
       }
     }
-    if (
-      !person ||
-      !lines.length ||
-      lines.some(
-        (l) =>
-          typeof l.name !== 'string' || !l.name.trim() ||
-          ![l.qty, l.rate, l.discount, l.tax].every(Number.isFinite) ||
-          l.qty <= 0 ||
-          !Number.isInteger(l.qty) ||
-          l.rate < 0 ||
-          l.discount < 0 ||
-          l.discount > (l.discountType === 'Amount' ? l.qty * l.rate : 100) ||
-          l.tax < 0 ||
-          l.tax > 100
-      ) ||
-      due < date
-    ) {
-      notify('Choose a customer/supplier, add valid items and check the due date.');
+    if (!person) {
+      notify(purchase ? 'Select a supplier.' : 'Select a customer.');
+      return false;
+    }
+    if (!lines.length) {
+      notify('Add at least one product, service or custom charge.');
+      return false;
+    }
+    const invalidLineIndex = lines.findIndex((l) =>
+      typeof l.name !== 'string' || !l.name.trim() ||
+      ![l.qty, l.rate, l.discount, l.tax].every(Number.isFinite) ||
+      l.qty <= 0 || !Number.isInteger(l.qty) || l.rate < 0 || l.discount < 0 ||
+      l.discount > (l.discountType === 'Amount' ? l.qty * l.rate : 100) || l.tax < 0 || l.tax > 100
+    );
+    if (invalidLineIndex >= 0) {
+      notify(`Check item ${invalidLineIndex + 1}: enter a description, positive whole quantity, valid rate, discount and tax.`);
+      return false;
+    }
+    if (!nonGst) {
+      const invalidTaxIndex = lines.findIndex(line => ![5,12,18,28].includes(line.tax));
+      if (invalidTaxIndex >= 0) {
+        notify(`Choose 5%, 12%, 18% or 28% GST for item ${invalidTaxIndex + 1}. Use the Non-GST invoice page for items without GST.`);
+        return false;
+      }
+    }
+    if ((purchase || quotation) && due < date) {
+      notify(quotation ? 'Valid-until date cannot be before the quotation date.' : 'Supplier due date cannot be before the purchase date.');
       return false;
     }
     return true;
@@ -1092,7 +1162,7 @@ export function DocumentComposer({
         invoiceKind: 'Sale' as const,
         businessCategory: 'NewGoods' as const,
         invoiceDate: date,
-        dueDate: due >= date ? due : date,
+        dueDate: null,
         inclusive: nonGst ? false : !!inclusive,
         taxMode,
         placeOfSupply,
@@ -1307,11 +1377,17 @@ export function DocumentComposer({
                     data: c,
                   }));
                 }}
-                onChange={(val) => {
+                onChange={(val, selectedItem) => {
                   setCustomerId(val);
-                  const c = purchase
+                  const selectedRecord = selectedItem?.data
+                    ? (purchase ? mapSupplierFromApi(selectedItem.data) : mapCustomerFromApi(selectedItem.data))
+                    : undefined;
+                  if (!purchase && selectedRecord) {
+                    setCustomerChoices(current => current.some(item => item.id === selectedRecord.id) ? current : [selectedRecord as any, ...current]);
+                  }
+                  const c = selectedRecord || (purchase
                     ? supplierChoices.find((x) => x.id === val) || state.suppliers.find((x) => x.id === val)
-                    : customerChoices.find((x) => x.id === val) || state.customers.find((x) => x.id === val);
+                    : customerChoices.find((x) => x.id === val) || state.customers.find((x) => x.id === val));
                   const days = purchase
                     ? (c as any)?.terms
                     : Number((c as any)?.details?.paymentTerms || 0);
@@ -1321,8 +1397,8 @@ export function DocumentComposer({
                       name: c.name || '',
                       address: c.address || '',
                       phone: c.phone || '',
-                      state: (c as any)?.details?.state || (c as any)?.state || '',
-                      stateCode: (c as any)?.stateCode || '',
+                      state: (c as any)?.details?.state || (c as any)?.state || 'Tamil Nadu',
+                      stateCode: (c as any)?.stateCode || '33',
                       postalCode: (c as any)?.details?.postalCode || (c as any)?.postalCode || '',
                     };
                     setBillTo(nextBillTo);
@@ -1388,16 +1464,17 @@ export function DocumentComposer({
             )}
 
             <Field label="Document number">
-              <input readOnly value={id} />
+              <input readOnly value={isEditMode ? id : expectedNumber} />
+              {!isEditMode && <span className="muted">The server assigns the next GST or Non-GST number at issue time, preventing duplicates.</span>}
             </Field>
 
             <Field label="Date">
               <input type="date" max={TODAY} value={date} onChange={(e) => setDate(e.target.value)} />
             </Field>
 
-            <Field label={quotation ? 'Valid until' : 'Due date'}>
+            {quotation && <Field label="Valid until">
               <input type="date" min={date} value={due} onChange={(e) => setDue(e.target.value)} />
-            </Field>
+            </Field>}
 
             {purchase ? (
               <Field label="Supplier invoice / reference">
@@ -1407,20 +1484,7 @@ export function DocumentComposer({
                   placeholder="e.g. CIT/26/8053 (optional for order/draft)"
                 />
               </Field>
-            ) : (
-              <Field label="Invoice content">
-                <input readOnly value="Products and services" />
-                <span className="muted">Add any combination of catalogue products, printing services and custom charges.</span>
-              </Field>
-            )}
-
-            {!purchase && <Field label="Invoice tax type">
-              <select disabled={requestedNonGst} value={nonGst ? 'non-gst' : 'gst'} onChange={(e) => setTaxDocumentMode(e.target.value === 'non-gst')}>
-                <option value="gst">GST invoice</option>
-                <option value="non-gst">Non-GST invoice</option>
-              </select>
-              {requestedNonGst && <span className="muted">This invoice was started from the dedicated Non-GST action. Use New invoice when GST is required.</span>}
-            </Field>}
+            ) : null}
 
             {!nonGst && <Field label="GST supply type">
               <select value={taxMode} onChange={(e) => {
@@ -1440,19 +1504,6 @@ export function DocumentComposer({
                 placeholder="State / union territory"
               />
             </Field>}
-
-            <Field label="Price entry mode">
-              <select
-                value={nonGst ? 'non-gst' : (inclusive ? 'inclusive' : 'exclusive')}
-                disabled={nonGst}
-                onChange={(e) => setInclusive(e.target.value === 'inclusive')}
-              >
-                {nonGst && <option value="non-gst">Non-GST · entered rate is final</option>}
-                <option value="inclusive">GST inclusive · entered rate includes tax</option>
-                <option value="exclusive">GST exclusive · add tax to entered rate</option>
-              </select>
-              {!nonGst && <span className="muted">This is the default for new items. Each item can use its own mode below.</span>}
-            </Field>
 
             {person && (
               <div className="full customer-preview">
@@ -1497,7 +1548,7 @@ export function DocumentComposer({
                   stateCode: 'State code',
                   postalCode: 'PIN code',
                 }).map(([k, label]) => (
-                  <Field key={k} label={`${label}${['name', 'address', 'state'].includes(k) ? ' *' : ''}`}>
+                  <Field key={k} label={`${label}${['name', 'address'].includes(k) ? ' *' : ''}`}>
                     <input
                       value={(billTo as any)[k] || ''}
                       onChange={(e) => {
@@ -1573,14 +1624,13 @@ export function DocumentComposer({
                     label: p.name,
                     sublabel: `${p.category || 'Product'} · ${p.unit || 'Piece'} · ${money(purchase ? p.cost : p.price)}`,
                   }))}
-                  onChange={(val) => setProduct(val)}
+                  onChange={(val) => {
+                    setProduct(val);
+                    if (val) addProduct(val);
+                  }}
                   onClear={() => setProduct('')}
                 />
               </div>
-              <Btn secondary onClick={addProduct}>
-                <Plus size={15} />
-                Add product
-              </Btn>
               <Btn secondary onClick={() => setNewProduct(true)}>
                 Create product
               </Btn>
@@ -1605,42 +1655,16 @@ export function DocumentComposer({
                       label: x.name,
                       sublabel: `${x.category || 'Service'} · ${money(x.rate)}`,
                     }))}
-                  onChange={(val) => setServiceId(val)}
+                  onChange={(val) => {
+                    setServiceId(val);
+                    if (val) addService(val);
+                  }}
                   onClear={() => setServiceId('')}
                 />
               </div>
-              <Btn
-                secondary
-                onClick={() => {
-                  const x = state.serviceCatalog.find((x) => x.id === serviceId);
-                  if (x) {
-                    setLines((ls) => [
-                      ...ls,
-                      {
-                        ...blankLine(),
-                        lineType: 'Service',
-                        serviceId: x.id,
-                        name: x.name,
-                        details: x.description || '',
-                        unit: x.unit || 'Job',
-                        rate: inclusive ? x.rate : x.rate / (1 + x.tax / 100),
-                        inclusive: nonGst ? false : inclusive,
-                        tax: nonGst ? 0 : x.tax,
-                        taxTreatment: nonGst ? 'NonGST' : 'Taxable',
-                        hsn: x.sac,
-                        warranty: x.warranty,
-                        clientLineKey: uid('CLK'),
-                      } as any,
-                    ]);
-                  }
-                  setServiceId('');
-                }}
-              >
-                <Plus size={15} /> Add service
+              <Btn secondary onClick={() => setNewService(true)}>
+                Create service
               </Btn>
-              <Link className="text-link" href="/service-catalog">
-                Manage services
-              </Link>
             </div>
           )}
 
@@ -1682,7 +1706,7 @@ export function DocumentComposer({
                           onChange={(e) => update(i, 'hsn', e.target.value)}
                         />
 
-                        {l.lineType === 'Charge' && <Badge>Non-stock charge</Badge>}
+                        {l.lineType === 'Charge' && <Badge>{/shipping/i.test(l.name) ? 'Shipping charge' : 'Additional charge'}</Badge>}
                       </div>
                       {l.lineType === 'Service' && (
                         <details className="line-specifications">
@@ -1732,7 +1756,7 @@ export function DocumentComposer({
                         <option value="exclusive">GST excl.</option>
                       </select>}
                     </td>
-                    {!nonGst && <td>
+                    <td>
                       <input
                         aria-label={`Item ${i + 1} discount`}
                         className="table-input"
@@ -1755,40 +1779,25 @@ export function DocumentComposer({
                         <option value="Percentage">%</option>
                         <option value="Amount">₹ per line</option>
                       </select>
-                    </td>}
-                    <td>
-                      <select
-                        aria-label={`Item ${i + 1} tax treatment`}
-                        className="table-input"
-                        disabled={isPosted}
-                        style={{ marginBottom: 4 }}
-                        value={l.taxTreatment || 'Taxable'}
-                        onChange={(e) => {
-                          const val = e.target.value as 'Taxable' | 'Exempt' | 'NonGST';
-                          update(i, 'taxTreatment', val);
-                          if (val === 'Exempt' || val === 'NonGST') {
-                            update(i, 'tax', 0);
-                          }
-                        }}
-                      >
-                        <option value="Taxable">Taxable</option>
-                        <option value="Exempt">Exempt</option>
-                        <option value="NonGST">Non-GST</option>
-                      </select>
+                    </td>
+                    {!nonGst && <td>
                       <select
                         aria-label={`Item ${i + 1} GST`}
                         className="table-input"
-                        disabled={isPosted || l.taxTreatment === 'Exempt' || l.taxTreatment === 'NonGST'}
-                        value={l.taxTreatment === 'Exempt' || l.taxTreatment === 'NonGST' ? 0 : l.tax}
-                        onChange={(e) => update(i, 'tax', +e.target.value)}
+                        disabled={isPosted}
+                        value={l.tax}
+                        onChange={(e) => {
+                          update(i, 'taxTreatment', 'Taxable');
+                          update(i, 'tax', +e.target.value);
+                        }}
                       >
-                        {[0, 5, 12, 18, 28].map((v) => (
+                        {[5, 12, 18, 28].map((v) => (
                           <option key={v} value={v}>
                             {v}%
                           </option>
                         ))}
                       </select>
-                    </td>
+                    </td>}
                     <td className="amount">
                       {money(lineTotal(l, inclusive).total)}
                       <small>Base {money(lineTotal(l, inclusive).base)}</small>
@@ -1892,7 +1901,7 @@ export function DocumentComposer({
           </div>
         </Card>
 
-        {!quotation && !purchase && (
+        {false && !quotation && !purchase && (
           <Card
             title="Payment received"
             sub="Leave empty for credit. Add one or more payments for a full, partial or split payment."
@@ -2231,13 +2240,25 @@ export function DocumentComposer({
       )}
 
       {newProduct && <ProductForm onClose={() => setNewProduct(false)} />}
+      {newService && (
+        <QuickServiceForm
+          onClose={() => setNewService(false)}
+          onSave={async (service) => {
+            const saved = await saveServiceApi(service);
+            if (saved) {
+              await refreshMasterData();
+              setNewService(false);
+            }
+          }}
+        />
+      )}
       {newPerson && <PersonForm supplier={purchase} onClose={() => setNewPerson(false)} />}
 
       {/* Serial modal removed - products are catalogue records only */}
 
       {review && !purchase && (
         <PrintDialog
-          bills={[{ ...bill, previewPaid: payRows.reduce((n, p) => n + (+p.amount || 0), 0) }]}
+          bills={[bill]}
           onClose={() => setReview(false)}
         />
       )}
@@ -2262,7 +2283,6 @@ export function DocumentComposer({
           isOpen={issueModalOpen}
           onClose={() => setIssueModalOpen(false)}
           draft={issueTargetDraft}
-          initialPayments={payRows}
           onIssued={(inv) => {
             const invoiceId = inv?._id || inv?.id || issueTargetDraft.id;
             router.push('/sales/' + invoiceId);

@@ -138,13 +138,18 @@ export async function receiptPdfBytes(settings: any, receipt: any, invoice?: any
 
   const receiptNo = snap?.receiptNumber || receipt.receiptNumber || receipt.id || receipt._id || 'RCP';
   const receiptDate = snap?.receiptDate || receipt.date || (receipt.createdAt ? String(receipt.createdAt).slice(0, 10) : '');
-  const method = snap?.payment?.method || receipt.components?.[0]?.method || receipt.method || 'Cash';
-  const ref = snap?.payment?.reference || receipt.components?.[0]?.reference || receipt.reference || 'N/A';
+  const receiptComponents = receipt.components || snap?.payment?.components || [];
+  const method = receiptComponents.length > 1 ? receiptComponents.map((component: any) => component.method).join(' + ') : (snap?.payment?.method || receiptComponents[0]?.method || receipt.method || 'Cash');
+  const ref = receiptComponents.map((component: any) => component.reference).filter(Boolean).join(', ') || snap?.payment?.reference || receiptComponents[0]?.reference || receipt.reference || 'N/A';
+  const splitDetails = receiptComponents.length > 1
+    ? receiptComponents.map((component: any) => `${component.method}: ${cash((component.amountPaise || 0) / 100)}`).join(' / ')
+    : '';
 
   const metaInfo = [
     'Receipt No: ' + receiptNo,
     'Receipt Date: ' + receiptDate,
     'Payment Method: ' + method,
+    ...(splitDetails ? ['Payment Split: ' + splitDetails] : []),
     'Reference / UTR: ' + ref,
   ].join('\n');
 
@@ -267,7 +272,7 @@ export async function paymentVoucherPdfBytes(settings: any, voucher: any) {
 
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text('PAYMENT VOUCHER', width / 2, y, {align: 'center'});
+  doc.text('MONEY PAID RECORD', width / 2, y, {align: 'center'});
   y += 7;
 
   if (settings?.logo) {
